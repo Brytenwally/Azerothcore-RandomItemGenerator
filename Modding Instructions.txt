@@ -1,0 +1,30 @@
+In this file I'll try to explain, to the best of my abilties how to modify the script to better suit your needs
+
+Modifying BLUEPRINTS
+The BLUEPRINTS dictionary defines the core identity and statistical profile of your generated gear. You can modify these to create custom archetypes.
+
+pool: A list of all valid Stat IDs allowed for this archetype. If a stat ID is not in this list, it will never appear on items of this type.
+
+anchors: The "Primary" stats that are forced onto an item of this archetype. These guarantee the item feels appropriate for its role (e.g., 3 for Agility on AGI_DPS).
+
+weights: The probability modifier for each stat. A higher number increases the likelihood of that stat being selected during generation. Use this to tune how common or rare specific stats feel for an archetype.
+
+How to Identify Stat IDs:
+All Stat IDs used in these blueprints correspond to the STAT_NAMES dictionary located at the very beginning of the main script. Consult that list to find the ID for the specific statistic you wish to add or remove
+
+Adding New Archetypes
+Simply define a new key in the BLUEPRINTS dictionary:
+
+Python
+
+
+"MY_NEW_TYPE": {
+    "pool": [1, 2, 3, 4],
+    "anchors": [1],
+    "weights": {1: 100, 2: 50, 3: 25, 4: 10}
+}
+Important Notes:
+
+All anchors must be present in your pool.
+
+Adding the dictionary entry is the first step.
