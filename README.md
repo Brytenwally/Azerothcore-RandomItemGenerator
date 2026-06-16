@@ -19,7 +19,7 @@ CSV: Generates a standardized CSV for external data management or mass-import to
 Dynamic Visuals: Automatically maps generated items to existing DisplayIDs based on their source archetype.
 
 
-***How to use**
+**How to use**
 
 
 
