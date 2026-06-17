@@ -284,7 +284,20 @@ for (cls, subcls), group in df.groupby(['class', 'subclass']):
     }
 
 print("Naming engine compiled.")
+
 material_library = {}
+
+# --- NEW: Calculate Blizzlike Weapon Subclass Delay Averages ---
+print(" -> Analyzing global weapon subclass speed baselines...")
+# Filter for weapons with valid attack speeds
+weapons_df = df[(df['class'] == 2) & (df['delay'] > 0)]
+# Group by subclass and convert the float averages to integers
+subclass_delays = weapons_df.groupby('subclass')['delay'].mean().round().astype(int).to_dict()
+
+# Save this library alongside your other brain data
+joblib.dump(material_library, 'material_library.joblib')
+
+
 
 for (c, sc, q), group in df.groupby(['class', 'subclass', 'Quality']):
     # Get unique pairs of material and sheath
@@ -297,7 +310,8 @@ master_brain = {
     "lookup_database": lookup_database, 
     "global_budget_curves": global_budget_curves,
     "archetype_profiles": archetype_profiles,
-    "name_database": name_database
+    "name_database": name_database,
+    "subclass_delays": subclass_delays
 }
 joblib.dump(master_brain, "blizzlike_master_brain.pkl")
 print("🎉 Success! Cohesive Archetype Matrix successfully compiled and exported.")
