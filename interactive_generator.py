@@ -64,7 +64,7 @@ CATEGORIES = {
     9: {"name": "Polearm", "class": 2, "subclass": 6, "InventoryType": 17, "delay": 3500, "dmg_type1": 0},
     10: {"name": "Two-Handed Axe", "class": 2, "subclass": 1, "InventoryType": 17, "delay": 3600, "dmg_type1": 0},
     11: {"name": "Crossbow", "class": 2, "subclass": 18, "InventoryType": 26, "delay": 3000, "dmg_type1": 0},
-    12: {"name": "Bow", "class": 2, "subclass": 2, "InventoryType": 26, "delay": 2800, "dmg_type1": 0},
+    12: {"name": "Bow", "class": 2, "subclass": 2, "InventoryType": 15, "delay": 2800, "dmg_type1": 0},
     13: {"name": "Gun", "class": 2, "subclass": 3, "InventoryType": 26, "delay": 2800, "dmg_type1": 0},
     14: {"name": "Thrown Weapon", "class": 2, "subclass": 16, "InventoryType": 25, "delay": 2000, "dmg_type1": 0},
     15: {"name": "One-Handed Mace", "class": 2, "subclass": 4, "InventoryType": 13, "delay": 2600, "dmg_type1": 0},
@@ -110,7 +110,7 @@ CATEGORIES = {
     47: {"name": "Plate Feet", "class": 4, "subclass": 4, "InventoryType": 8, "delay": 0, "dmg_type1": 0},
     
     # Miscellaneous (Subclass 0)
-    48: {"name": "Cloak", "class": 4, "subclass": 0, "InventoryType": 16, "delay": 0, "dmg_type1": 0},
+    48: {"name": "Cloak", "class": 4, "subclass": 1, "InventoryType": 16, "delay": 0, "dmg_type1": 0},
     49: {"name": "Necklace", "class": 4, "subclass": 0, "InventoryType": 2, "delay": 0, "dmg_type1": 0},
     50: {"name": "Ring / Band", "class": 4, "subclass": 0, "InventoryType": 11, "delay": 0, "dmg_type1": 0},
     51: {"name": "Shield", "class": 4, "subclass": 6, "InventoryType": 14, "delay": 0, "dmg_type1": 0},
@@ -130,8 +130,8 @@ QUALITIES = {
 BLUEPRINTS = {
     "AGI_DPS":   {"pool": [3, 7, 31, 32, 36, 38, 44], "anchors": [3], "weights": {3: 130, 7: 100, 31: 90, 32: 90, 36: 60, 38: 80, 44: 70}},
     "STR_DPS":   {"pool": [4, 7, 31, 32, 36, 38, 44], "anchors": [4], "weights": {4: 130, 7: 100, 31: 90, 32: 90, 36: 60, 38: 80, 44: 70}},
-    "SP_DPS":    {"pool": [5, 7, 45, 31, 32, 36,6],     "anchors": [5], "weights": {5: 120, 45: 130, 7: 90, 31: 85, 32: 85, 36: 80, 6: 50}},
-    "HEALER":    {"pool": [5, 6, 7, 45, 32, 36, 43],   "anchors": [5], "weights": {5: 110, 6: 110, 45: 120, 7: 90, 32: 80, 36: 80, 43: 75}},
+    "SP_DPS":    {"pool": [5, 7, 45, 31, 32, 36],     "anchors": [5, 45], "weights": {5: 120, 45: 130, 7: 90, 31: 85, 32: 85, 36: 80}},
+    "HEALER":    {"pool": [5, 6, 7, 45, 32, 36, 43],   "anchors": [5, 45], "weights": {5: 110, 6: 110, 45: 120, 7: 90, 32: 80, 36: 80, 43: 75}},
     "STR_TANK":  {"pool": [4, 7, 12, 13, 14, 31, 37],  "anchors": [7, 4],  "weights": {7: 130, 4: 100, 12: 85, 13: 90, 14: 90, 31: 75, 37: 85}},
     "AGI_TANK":  {"pool": [3, 7, 12, 13, 31, 37, 32, 36, 38], "anchors": [3, 7], "weights": {3: 150, 7: 140, 12: 85, 13: 100, 31: 80, 37: 85, 32: 45, 36: 45, 38: 40}},
     "AGI_INT_DPS": {"pool": [3, 5, 7, 31, 32, 36, 38, 44], "anchors": [3, 5], "weights": {3: 130, 5: 100, 7:100, 31: 90, 32: 90, 36: 60, 38: 80, 44: 70}}
@@ -633,139 +633,217 @@ print("=======================================================")
 print("  🔮 COHESIVE SYNERGY ARCHETYPE GENERATOR ENGINE       ")
 print("=======================================================")
 
-while True:
-    print("\n--- NEW ITEM GENERATION BATCH ---")
-    print("Select Category Group:")
-    print("  [1] Weapons")
-    print("  [2] Armor")
-    group_choice = get_input("Choice: ", lambda x: int(x) if x in ['1', '2'] else int("err"))
-    
-    cat_idx = -1
+# ── Helper: resolve a list of CATEGORIES keys from a menu that supports "All of the above" ──
 
-    if group_choice == 1: # WEAPONS
-        print("\n  [1] 1H Weapons [2] 2H Weapons [3] Ranged")
-        wpn_group = get_input("Select Group: ", lambda x: int(x) if x in ['1', '2', '3'] else int("err"))
-        
-        if wpn_group == 1: # 1H
-            print("    [1] Daggers [2] Fist [3] 1H Axes [4] 1H Maces [5] 1H Swords")
-            sub = get_input("Select: ", lambda x: int(x) if x in ['1','2','3','4','5'] else int("err"))
-            cat_idx = {1: 4, 2: 6, 3: 7, 4: 15, 5: 2}[sub]
-        elif wpn_group == 2: # 2H
-            print("    [1] Staves [2] Polearms [3] 2H Axes [4] 2H Maces [5] 2H Swords")
-            sub = get_input("Select: ", lambda x: int(x) if x in ['1','2','3','4','5'] else int("err"))
-            cat_idx = {1: 5, 2: 9, 3: 10, 4: 8, 5: 3}[sub]
-        elif wpn_group == 3: # Ranged
-            print("    [1] Bows [2] Crossbows [3] Guns [4] Thrown [5] Wands")
-            sub = get_input("Select: ", lambda x: int(x) if x in ['1','2','3','4','5'] else int("err"))
-            cat_idx = {1: 12, 2: 11, 3: 13, 4: 14, 5: 1}[sub]
+def pick_cat_indices(prompt_label, mapping):
+    """
+    Shows a numbered menu from `mapping` (int -> cat_idx or list[cat_idx])
+    plus an extra "All of the above" option.
+    Returns a flat list of cat_idx values chosen.
+    mapping values can be a single int or a list of ints.
+    """
+    all_num = max(mapping.keys()) + 1
+    print(f"\n{prompt_label}")
+    for num, val in mapping.items():
+        if isinstance(val, list):
+            label = " / ".join(CATEGORIES[v]["name"] for v in val)
+        else:
+            label = CATEGORIES[val]["name"]
+        print(f"  [{num}] {label}")
+    print(f"  [{all_num}] All of the above (random per item)")
+    valid = list(mapping.keys()) + [all_num]
+    choice = get_input("Select: ", lambda x: int(x) if int(x) in valid else int("err"))
+    if choice == all_num:
+        # flatten all values
+        result = []
+        for v in mapping.values():
+            if isinstance(v, list):
+                result.extend(v)
+            else:
+                result.append(v)
+        return result
+    else:
+        val = mapping[choice]
+        return val if isinstance(val, list) else [val]
 
-    else: # ARMOR
-        print("\n  [1] Cloth [2] Leather [3] Mail [4] Plate [5] Miscellaneous")
-        mat = get_input("Select Material: ", lambda x: int(x) if x in ['1','2','3','4','5'] else int("err"))
-        
-        if mat <= 4:
-            # Material base start indices: Cloth(16), Leather(24), Mail(32), Plate(40)
-            base = {1: 16, 2: 24, 3: 32, 4: 40}[mat]
-            print("    [1] Helm [2] Shoulder [3] Chest [4] Wrist [5] Gloves [6] Waist [7] Legs [8] Feet")
-            slot = get_input("Select Slot: ", lambda x: int(x) if 1 <= int(x) <= 8 else int("err"))
-            cat_idx = base + (slot - 1)
-        elif mat == 5: # Miscellaneous & Shields
-            print(" [1] Cloak [2] Necklace [3] Ring [4] Shield [5]OffHand")
-            sub = get_input("Select: ", lambda x: int(x) if x in ['1','2','3','4','5'] else int("err"))
-            cat_idx = {1: 48, 2: 49, 3: 50, 4: 51, 5:52}[sub]
 
-    category = CATEGORIES[cat_idx]
-
-    # [Blueprint Routing Logic — All of the above supported via prompt_blueprint()]
-    chosen_blueprint_key = None
-    chosen_blueprint_candidates = []
+def resolve_blueprint_for_category(category):
+    """
+    Given a single CATEGORIES entry (dict), prompt for and return
+    (chosen_blueprint_key, chosen_blueprint_candidates).
+    """
     subc = category["subclass"]
-    cls = category["class"]
+    cls  = category["class"]
 
     if cls == 2:  # WEAPONS
-        if subc == 19:  # Wand
-            chosen_blueprint_key, chosen_blueprint_candidates = prompt_blueprint(
-                "Wand", {1: "SP_DPS", 2: "HEALER"})
+        if subc == 19:   # Wand
+            return prompt_blueprint("Wand", {1: "SP_DPS", 2: "HEALER"})
         elif subc == 7:  # 1H Sword
-            chosen_blueprint_key, chosen_blueprint_candidates = prompt_blueprint(
-                "1H Sword", {1: "AGI_DPS", 2: "STR_TANK", 3: "STR_DPS", 4: "SP_DPS", 5: "HEALER"})
+            return prompt_blueprint("1H Sword", {1: "AGI_DPS", 2: "STR_TANK", 3: "STR_DPS", 4: "SP_DPS", 5: "HEALER"})
         elif subc == 8:  # 2H Sword
-            chosen_blueprint_key, chosen_blueprint_candidates = prompt_blueprint(
-                "2H Sword", {1: "AGI_DPS", 2: "STR_DPS", 3: "STR_TANK", 4: "AGI_INT_DPS"})
-        elif subc == 15:  # Dagger
-            chosen_blueprint_key, chosen_blueprint_candidates = prompt_blueprint(
-                "Dagger", {1: "AGI_DPS", 2: "SP_DPS", 3: "HEALER", 4: "AGI_INT_DPS"})
-        elif subc == 10:  # Staff
-            chosen_blueprint_key, chosen_blueprint_candidates = prompt_blueprint(
-                "Staff", {1: "AGI_DPS", 2: "SP_DPS", 3: "HEALER", 4: "AGI_TANK", 5: "STR_DPS", 6: "AGI_INT_DPS"})
-        elif subc == 13:  # Fist Weapon
-            chosen_blueprint_key, chosen_blueprint_candidates = prompt_blueprint(
-                "Fist Weapon", {1: "AGI_DPS", 2: "SP_DPS", 3: "AGI_INT_DPS"})
-        elif subc == 0:  # 1H Axe (Class 2)
-            chosen_blueprint_key, chosen_blueprint_candidates = prompt_blueprint(
-                "1H Axe", {1: "AGI_DPS", 2: "STR_DPS", 3: "STR_TANK", 4: "AGI_INT_DPS"})
+            return prompt_blueprint("2H Sword", {1: "AGI_DPS", 2: "STR_DPS", 3: "STR_TANK", 4: "AGI_INT_DPS"})
+        elif subc == 15: # Dagger
+            return prompt_blueprint("Dagger", {1: "AGI_DPS", 2: "SP_DPS", 3: "HEALER", 4: "AGI_INT_DPS"})
+        elif subc == 10: # Staff
+            return prompt_blueprint("Staff", {1: "AGI_DPS", 2: "SP_DPS", 3: "HEALER", 4: "AGI_TANK", 5: "STR_DPS", 6: "AGI_INT_DPS"})
+        elif subc == 13: # Fist Weapon
+            return prompt_blueprint("Fist Weapon", {1: "AGI_DPS", 2: "SP_DPS", 3: "AGI_INT_DPS"})
+        elif subc == 0:  # 1H Axe
+            return prompt_blueprint("1H Axe", {1: "AGI_DPS", 2: "STR_DPS", 3: "STR_TANK", 4: "AGI_INT_DPS"})
         elif subc == 1:  # 2H Axe
-            chosen_blueprint_key, chosen_blueprint_candidates = prompt_blueprint(
-                "2H Axe", {1: "AGI_DPS", 2: "STR_DPS", 3: "STR_TANK", 4: "AGI_INT_DPS"})
+            return prompt_blueprint("2H Axe", {1: "AGI_DPS", 2: "STR_DPS", 3: "STR_TANK", 4: "AGI_INT_DPS"})
         elif subc in [5, 6]:  # 2H Mace or Polearm
-            chosen_blueprint_key, chosen_blueprint_candidates = prompt_blueprint(
-                category['name'], {1: "STR_DPS", 2: "AGI_DPS", 3: "STR_TANK", 4: "AGI_TANK", 5: "AGI_INT_DPS"})
+            return prompt_blueprint(category['name'], {1: "STR_DPS", 2: "AGI_DPS", 3: "STR_TANK", 4: "AGI_TANK", 5: "AGI_INT_DPS"})
         elif subc in [2, 3, 18]:  # Bows, Guns, Crossbows
-            chosen_blueprint_key, chosen_blueprint_candidates = prompt_blueprint(
-                category['name'], {1: "STR_TANK", 2: "STR_DPS", 3: "AGI_DPS", 4: "AGI_INT_DPS"})
-        elif subc == 16:  # Thrown
-            chosen_blueprint_key, chosen_blueprint_candidates = prompt_blueprint(
-                "Thrown Weapon", {1: "AGI_DPS", 2: "STR_DPS", 3: "STR_TANK"})
+            return prompt_blueprint(category['name'], {1: "STR_TANK", 2: "STR_DPS", 3: "AGI_DPS", 4: "AGI_INT_DPS"})
+        elif subc == 16: # Thrown
+            return prompt_blueprint("Thrown Weapon", {1: "AGI_DPS", 2: "STR_DPS", 3: "STR_TANK"})
         elif subc == 4:  # 1H Mace
-            chosen_blueprint_key, chosen_blueprint_candidates = prompt_blueprint(
-                "1H Mace", {1: "STR_DPS", 2: "STR_TANK", 3: "HEALER", 4: "SP_DPS"})
+            return prompt_blueprint("1H Mace", {1: "STR_DPS", 2: "STR_TANK", 3: "HEALER", 4: "SP_DPS"})
 
     elif cls == 4:  # ARMOR
-        if subc == 1:  # Cloth
-            chosen_blueprint_key, chosen_blueprint_candidates = prompt_blueprint(
-                "Cloth", {1: "SP_DPS", 2: "HEALER"})
+        if subc == 1:    # Cloth
+            # Intercept Cloaks (InventoryType 16) to use Miscellaneous blueprints
+            if category.get('InventoryType') == 16:
+                return prompt_blueprint("Cloak", 
+                    {1: "AGI_DPS", 2: "STR_DPS", 3: "SP_DPS", 4: "HEALER", 
+                     5: "AGI_INT_DPS", 6: "STR_TANK", 7: "AGI_TANK"})
+            # Standard Cloth logic
+            return prompt_blueprint("Cloth", {1: "SP_DPS", 2: "HEALER"})
         elif subc == 2:  # Leather
-            chosen_blueprint_key, chosen_blueprint_candidates = prompt_blueprint(
-                "Leather", {1: "AGI_DPS", 2: "AGI_TANK", 3: "HEALER", 4: "SP_DPS", 5: "AGI_INT_DPS"})
+            return prompt_blueprint("Leather", {1: "AGI_DPS", 2: "AGI_TANK", 3: "HEALER", 4: "SP_DPS", 5: "AGI_INT_DPS"})
         elif subc == 3:  # Mail
-            chosen_blueprint_key, chosen_blueprint_candidates = prompt_blueprint(
-                "Mail", {1: "AGI_DPS", 2: "STR_DPS", 3: "HEALER", 4: "SP_DPS", 5: "AGI_INT_DPS"})
+            return prompt_blueprint("Mail", {1: "AGI_DPS", 2: "STR_DPS", 3: "HEALER", 4: "SP_DPS", 5: "AGI_INT_DPS"})
         elif subc == 4:  # Plate
-            chosen_blueprint_key, chosen_blueprint_candidates = prompt_blueprint(
-                "Plate", {1: "STR_DPS", 2: "STR_TANK", 3: "HEALER"})
-        elif subc == 0 or subc == 6:  # Miscellaneous (0) OR Shields (6)
-            # 1. Shield (Subclass 6)
+            return prompt_blueprint("Plate", {1: "STR_DPS", 2: "STR_TANK", 3: "HEALER"})
+        elif subc == 0 or subc == 6:  # Miscellaneous or Shield
             if subc == 6:
-                chosen_blueprint_key, chosen_blueprint_candidates = prompt_blueprint(
-                    category['name'], {1: "STR_TANK", 2: "SP_DPS", 3: "HEALER"})
-            # 2. Offhand (InventoryType 23)
+                return prompt_blueprint(category['name'], {1: "STR_TANK", 2: "SP_DPS", 3: "HEALER"})
             elif category['InventoryType'] == 23:
-                chosen_blueprint_key, chosen_blueprint_candidates = prompt_blueprint(
-                    category['name'], {1: "SP_DPS", 2: "HEALER"})
-            # 3. Standard Miscellaneous (Cloak, Neck, Ring)
+                return prompt_blueprint(category['name'], {1: "SP_DPS", 2: "HEALER"})
             else:
-                chosen_blueprint_key, chosen_blueprint_candidates = prompt_blueprint(
-                    category['name'],
+                return prompt_blueprint(category['name'],
                     {1: "AGI_DPS", 2: "STR_DPS", 3: "SP_DPS", 4: "HEALER",
                      5: "AGI_INT_DPS", 6: "STR_TANK", 7: "AGI_TANK"})
         else:
-            print(f"⚠️ Configuration mapping missing for Subclass {subc} (Class {cls}). Defaulting to STR_DPS.")
-            chosen_blueprint_key = "STR_DPS"
-            chosen_blueprint_candidates = ["STR_DPS"]
+            print(f"⚠️ Config missing for Subclass {subc} (Class {cls}). Defaulting to STR_DPS.")
+            return "STR_DPS", ["STR_DPS"]
 
-    # ... [Rest of the generation logic remains the same]
+    # Fallback
+    return "STR_DPS", ["STR_DPS"]
+
+
+while True:
+    print("\n--- NEW ITEM GENERATION BATCH ---")
+
+    # ── TIER 1: Top-level group ──────────────────────────────────────────────
+    print("Select Category Group:")
+    print("  [1] Weapons")
+    print("  [2] Armor")
+    print("  [3] All of the above (random per item)")
+    group_choice = get_input("Choice: ", lambda x: int(x) if x in ['1', '2', '3'] else int("err"))
+
+    # cat_pool = list of (cat_idx, blueprint_key, blueprint_candidates) resolved per item
+    # We first collect a pool of candidate cat_indices, then resolve blueprints.
+
+    cat_indices = []  # will hold one or more CATEGORIES keys
+
+    if group_choice == 3:  # ALL: every weapon + every armor slot
+        cat_indices = list(CATEGORIES.keys())
+
+    elif group_choice == 1:  # WEAPONS
+        # ── TIER 2: Weapon group ──
+        print("\nSelect Weapon Group:")
+        print("  [1] 1H Weapons")
+        print("  [2] 2H Weapons")
+        print("  [3] Ranged")
+        print("  [4] All of the above (random per item)")
+        wpn_group = get_input("Select Group: ", lambda x: int(x) if x in ['1','2','3','4'] else int("err"))
+
+        if wpn_group == 4:  # ALL weapon groups
+            cat_indices = [4, 6, 7, 15, 2,   # 1H
+                           5, 9, 10, 8, 3,    # 2H
+                           12, 11, 13, 14, 1] # Ranged
+
+        elif wpn_group == 1:  # 1H
+            cat_indices = pick_cat_indices(
+                "Select 1H Weapon:",
+                {1: 4, 2: 6, 3: 7, 4: 15, 5: 2})
+
+        elif wpn_group == 2:  # 2H
+            cat_indices = pick_cat_indices(
+                "Select 2H Weapon:",
+                {1: 5, 2: 9, 3: 10, 4: 8, 5: 3})
+
+        elif wpn_group == 3:  # Ranged
+            cat_indices = pick_cat_indices(
+                "Select Ranged Weapon:",
+                {1: 12, 2: 11, 3: 13, 4: 14, 5: 1})
+
+    else:  # ARMOR (group_choice == 2)
+        # ── TIER 2: Armor material ──
+        print("\nSelect Armor Material:")
+        print("  [1] Cloth")
+        print("  [2] Leather")
+        print("  [3] Mail")
+        print("  [4] Plate")
+        print("  [5] Miscellaneous")
+        print("  [6] All of the above (random per item)")
+        mat = get_input("Select Material: ", lambda x: int(x) if x in ['1','2','3','4','5','6'] else int("err"))
+
+        if mat == 6:  # ALL armor
+            cat_indices = list(range(16, 53))  # Cloth(16-23), Leather(24-31), Mail(32-39), Plate(40-47), Misc(48-52)
+
+        elif mat <= 4:
+            base = {1: 16, 2: 24, 3: 32, 4: 40}[mat]
+            mat_name = {1: "Cloth", 2: "Leather", 3: "Mail", 4: "Plate"}[mat]
+            # ── TIER 3: Armor slot ──
+            cat_indices = pick_cat_indices(
+                f"Select {mat_name} Slot:",
+                {1: base+0, 2: base+1, 3: base+2, 4: base+3,
+                 5: base+4, 6: base+5, 7: base+6, 8: base+7})
+
+        elif mat == 5:  # Miscellaneous
+            cat_indices = pick_cat_indices(
+                "Select Miscellaneous Slot:",
+                {1: 48, 2: 49, 3: 50, 4: 51, 5: 52})
+
+    # ── Blueprint resolution ─────────────────────────────────────────────────
+    # If exactly one category was chosen → ask blueprint once (original behaviour).
+    # If multiple categories were chosen → ask blueprint once per unique category type,
+    # then map each cat_idx to its resolved (key, candidates) pair.
+
+    unique_cat_indices = list(dict.fromkeys(cat_indices))  # deduplicate, preserve order
+
+    if len(unique_cat_indices) == 1:
+        # Single category: ask once, apply to all items
+        sole_category = CATEGORIES[unique_cat_indices[0]]
+        chosen_blueprint_key, chosen_blueprint_candidates = resolve_blueprint_for_category(sole_category)
+        # Build a flat lookup: cat_idx -> (key, candidates)
+        blueprint_map = {unique_cat_indices[0]: (chosen_blueprint_key, chosen_blueprint_candidates)}
+    else:
+        # Multiple categories: ask blueprint for each unique category type
+        blueprint_map = {}
+        seen_signatures = {}  # (cls, subc, invtype) -> resolved result, avoid asking twice for same type
+        for ci in unique_cat_indices:
+            cat = CATEGORIES[ci]
+            sig = (cat["class"], cat["subclass"], cat["InventoryType"])
+            if sig not in seen_signatures:
+                print(f"\n  ── Blueprint for: {cat['name']} ──")
+                result = resolve_blueprint_for_category(cat)
+                seen_signatures[sig] = result
+            blueprint_map[ci] = seen_signatures[sig]
+
+    # ── Shared generation parameters ────────────────────────────────────────
     print("\nAvailable Qualities:")
     for k, v in QUALITIES.items(): print(f"  [{k}] {v['name']}")
     selected_quality_entry = QUALITIES[get_input("Select Item Quality (Number): ", lambda x: int(x) if int(x) in QUALITIES else int("err"))]
-    # For multi-quality entries the engine will draw a random code per item; for single entries
-    # quality_code_pool holds a one-element list so the rest of the logic stays uniform.
     quality_code_pool = selected_quality_entry["code"] if selected_quality_entry["multi"] else [selected_quality_entry["code"]]
-    # quality_code is resolved fresh for every item inside the generation loop below.
 
     print("\nEnter Target Item Level (e.g., '85' or '50-85'):")
     ilvl_range = get_input("Choice: ", parse_ilvl_input)
     variance = get_input("Enter Budget Quality Variance % (0 to 25): ", lambda x: float(x) / 100.0 if 0 <= float(x) <= 25 else float("err"))
-    
+
     print("\nSelect Stat Distribution Allocation Profile:")
     print("  [1] Even Split\n  [2] Randomly Varied Split")
     dist_mode = get_input("Select Profile Mode (1 or 2): ", lambda x: int(x) if int(x) in [1, 2] else int("err"))
@@ -782,18 +860,26 @@ while True:
     random.shuffle(available_levels)
 
     for _ in range(quantity):
-        # --- Draw quality for THIS item (supports multi-quality pools) ---
+        # ── Per-item: draw quality ──
         quality_code = random.choice(quality_code_pool)
 
-        # 4. Handle the "Deck" (Refill if empty)
+        # ── Per-item: draw iLevel (deck shuffles on exhaust) ──
         if not available_levels:
             available_levels = list(range(ilvl_range[0], ilvl_range[1] + 1))
             random.shuffle(available_levels)
-        
-        # 5. DRAW THE NEW ILEVEL for THIS specific item
         ilvl = available_levels.pop()
 
-        # --- Resolve blueprint for this item (supports "All of the above") ---
+        # ── Per-item: pick a category from the pool ──
+        cat_idx = random.choice(cat_indices)
+        category = CATEGORIES[cat_idx]
+
+        # ── Per-item: resolve blueprint ──
+        item_blueprint_key_pair = blueprint_map.get(cat_idx)
+        if item_blueprint_key_pair:
+            chosen_blueprint_key, chosen_blueprint_candidates = item_blueprint_key_pair
+        else:
+            chosen_blueprint_key, chosen_blueprint_candidates = "STR_DPS", ["STR_DPS"]
+
         if chosen_blueprint_key == "__ALL__":
             item_blueprint_key = random.choice(chosen_blueprint_candidates)
         else:
@@ -836,31 +922,24 @@ while True:
 
         if interpolated["stat_profiles"]:
             chosen_profile = random.choice(interpolated["stat_profiles"])
-            random_prop_id = chosen_profile.get("RandomProperty", 0)
-            random_suff_id = chosen_profile.get("RandomSuffix", 0)
             db_stats_count = chosen_profile.get("num_stats", 2)
         else:
-            random_prop_id, random_suff_id = 0, 0
             db_stats_count = 2
 
-        if random_prop_id != 0 or random_suff_id != 0:
-            num_stats_to_roll = 0
+        if density_mode == 1:
+            num_stats_to_roll = db_stats_count if db_stats_count > 0 else 2
+        elif density_mode == 2:
+            if ilvl < 30: num_stats_to_roll = random.choices([1, 2], weights=[40, 60], k=1)[0]
+            elif ilvl < 45: num_stats_to_roll = random.choices([2, 3], weights=[65, 35], k=1)[0]
+            elif ilvl < 60: num_stats_to_roll = random.choices([2, 3], weights=[40, 60], k=1)[0]
+            else: num_stats_to_roll = random.choices([2, 3, 4], weights=[20, 65, 15], k=1)[0]
         else:
-            if density_mode == 1:
-                num_stats_to_roll = db_stats_count if db_stats_count > 0 else 2
-            elif density_mode == 2:
-                if ilvl < 30: num_stats_to_roll = random.choices([1, 2], weights=[40, 60], k=1)[0]
-                elif ilvl < 45: num_stats_to_roll = random.choices([2, 3], weights=[65, 35], k=1)[0]
-                elif ilvl < 60: num_stats_to_roll = random.choices([2, 3], weights=[40, 60], k=1)[0]
-                else: num_stats_to_roll = random.choices([2, 3, 4], weights=[20, 65, 15], k=1)[0]
-            else:
-                num_stats_to_roll = chosen_density_count
+            num_stats_to_roll = chosen_density_count
 
         stats = {f"stat_type{i}": 0 for i in range(1, 7)}
         stats.update({f"stat_value{i}": 0 for i in range(1, 7)})
-        has_random_enchant = (random_prop_id != 0 or random_suff_id != 0)
 
-        if not has_random_enchant and num_stats_to_roll > 0:
+        if num_stats_to_roll > 0:
             if item_blueprint_key and item_blueprint_key in BLUEPRINTS:
                 blueprint = BLUEPRINTS[item_blueprint_key]
                 pool, anchors, current_weights = list(blueprint["pool"]), list(blueprint["anchors"]), blueprint["weights"].copy()
@@ -953,7 +1032,7 @@ while True:
     "config": category, "quality": quality_code, "ilvl": ilvl, "name": generated_name,
     "displayid": predicted_display_id, "dmg_min": dmg_min, "dmg_max": dmg_max, "displayid": display_obj.get("id"), "display_source": display_obj, "delay": dynamic_delay,
     "dps": final_dps, "armor": final_armor, # <--- ARMOR IS HERE, 
-    "stats": stats, "RandomProperty": random_prop_id, "RandomSuffix": random_suff_id, "budget": final_budget, "required_level": req_level, "Material": item_material,
+    "stats": stats, "budget": final_budget, "required_level": req_level, "Material": item_material,
     "sheath": item_sheath, "sell_price": final_sell_price
 })
 
@@ -975,8 +1054,8 @@ with open(output_filename, "w") as f:
         description = f"iLvl {item['ilvl']} {c['name']} generated via structural blueprint routing."
         
         sql_string = f"""DELETE FROM `item_template` WHERE `entry` = {current_id};
-INSERT INTO `item_template` (`entry`, `class`, `subclass`, `name`, `displayid`, `Quality`, `InventoryType`, `itemlevel`, `RequiredLevel`, `armor`, `delay`, `dmg_min1`, `dmg_max1`, `dmg_type1`, `stat_type1`, `stat_value1`, `stat_type2`, `stat_value2`, `stat_type3`, `stat_value3`, `stat_type4`, `stat_value4`, `stat_type5`, `stat_value5`, `stat_type6`, `stat_value6`, `RandomProperty`, `RandomSuffix`, `Material`, `sheath`, `SellPrice`, `Description`) 
-VALUES ({current_id}, {c['class']}, {c['subclass']}, '{item['name']}', {item['displayid']}, {item['quality']}, {c['InventoryType']}, {item['ilvl']}, {item['required_level']}, {item.get('armor', 0)}, {item['delay']}, {item['dmg_min']}, {item['dmg_max']}, {c['dmg_type1']}, {s['stat_type1']}, {s['stat_value1']}, {s['stat_type2']}, {s['stat_value2']}, {s['stat_type3']}, {s['stat_value3']}, {s['stat_type4']}, {s['stat_value4']}, {s['stat_type5']}, {s['stat_value5']}, {s['stat_type6']}, {s['stat_value6']}, {item['RandomProperty']}, {item['RandomSuffix']}, {item['Material']}, {item['sheath']}, {item.get('sell_price', 0)},  '{description}');\n"""
+INSERT INTO `item_template` (`entry`, `class`, `subclass`, `name`, `displayid`, `Quality`, `InventoryType`, `itemlevel`, `RequiredLevel`, `armor`, `delay`, `dmg_min1`, `dmg_max1`, `dmg_type1`, `stat_type1`, `stat_value1`, `stat_type2`, `stat_value2`, `stat_type3`, `stat_value3`, `stat_type4`, `stat_value4`, `stat_type5`, `stat_value5`, `stat_type6`, `stat_value6`, `Material`, `sheath`, `SellPrice`, `Description`) 
+VALUES ({current_id}, {c['class']}, {c['subclass']}, '{item['name']}', {item['displayid']}, {item['quality']}, {c['InventoryType']}, {item['ilvl']}, {item['required_level']}, {item.get('armor', 0)}, {item['delay']}, {item['dmg_min']}, {item['dmg_max']}, {c['dmg_type1']}, {s['stat_type1']}, {s['stat_value1']}, {s['stat_type2']}, {s['stat_value2']}, {s['stat_type3']}, {s['stat_value3']}, {s['stat_type4']}, {s['stat_value4']}, {s['stat_type5']}, {s['stat_value5']}, {s['stat_type6']}, {s['stat_value6']}, {item['Material']}, {item['sheath']}, {item.get('sell_price', 0)},  '{description}');\n"""
         f.write(sql_string)
         
         combat_info = f" ({item['dps']} DPS | Min-Max: {item['dmg_min']}-{item['dmg_max']})" if c['class'] == 2 else " (Armor Piece)"
@@ -994,10 +1073,7 @@ VALUES ({current_id}, {c['class']}, {c['subclass']}, '{item['name']}', {item['di
                     secondaries.append(f"+{sv} Unknown Stat (ID: {st})")
         
       
-        if item['RandomProperty'] != 0 or item['RandomSuffix'] != 0:
-            print(f"    ↳ [Debug Allocation] Budget Frame: {item['budget']} | Set to 0 (Delegated dynamically to Client DBC Pools)")
-        else:
-            print(f"    ↳ [Debug Allocation] Total Budget: {item['budget']}")
+        print(f"    ↳ [Debug Allocation] Total Budget: {item['budget']}")
             
         # UPDATED: Print Source Metadata including the ID
         src = item.get("display_source", {})
