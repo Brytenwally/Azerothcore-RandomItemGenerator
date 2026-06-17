@@ -31,6 +31,8 @@ try:
     archetype_profiles = master["archetype_profiles"]
     name_database = master["name_database"]
     subclass_delays = master.get("subclass_delays", {})
+    weapon_nouns = master.get("weapon_nouns", {})
+    armor_nouns = master.get("armor_nouns", {})
 except Exception as e:
     print("❌ Critical Error: Model components failed to load. Run train_brain.py first.")
     exit()
@@ -473,25 +475,58 @@ def get_next_entry_id(cursor):
     cursor.execute("SELECT MAX(entry) FROM item_template WHERE entry >= 91000")
     result = cursor.fetchone()[0]
     return (result + 1) if result else 91000
-def generate_item_name(cat_keys):
+def generate_item_name(category_config):
+    """
+    Pure operational execution function. Uses the global 'master' arrays
+    unpacked at the top of the file to roll accurate Blizzlike names.
+    """
+    # 1. Parse configuration inputs (handles dict, 2-tuples, or 3-tuples)
+    if isinstance(category_config, dict):
+        cls = category_config.get("class")
+        subcls = category_config.get("subclass")
+        inv_type = category_config.get("InventoryType")
+    elif isinstance(category_config, (tuple, list)):
+        cls = category_config[0]
+        subcls = category_config[1]
+        inv_type = category_config[2] if len(category_config) >= 3 else None
+    else:
+        cls, subcls, inv_type = 2, 0, None
+
+    cat_keys = (cls, subcls)
+    
+    # 2. Extract context lists from the global name_database
     ndb = name_database.get(cat_keys, {
-        "adjectives": ["Reinforced"], 
-        "materials": ["Iron"], 
-        "nouns": ["Blade"], 
-        "properties": ["of Power"]
+        "adjectives": ["Reinforced"], "materials": ["Iron"], "nouns": ["Blade"], "properties": ["of Power"]
     })
+    
     adj_pool = ndb.get("adjectives", ["Reinforced"])
     mat_pool = ndb.get("materials", ["Iron"])
-    noun_pool = ndb.get("nouns", ["Blade"])
     prop_pool = ndb.get("properties", ["of Power"])
     
+    # 3. Pull Curated Noun Seeds from the unpacked global blocks
+    noun_pool = ndb.get("nouns", ["Blade"])
+    
+    if cls == 2:  # Weapons Mapping
+        noun_pool = weapon_nouns.get(subcls, noun_pool)
+        
+    elif cls == 4 and inv_type is not None:  # Armor & Accessories Mapping
+        if inv_type in armor_nouns:
+            slot_map = armor_nouns[inv_type]
+            # Match exact material style subclass, fall back to slot standard (0), or pick first available
+            noun_pool = slot_map.get(subcls) or slot_map.get(0) or list(slot_map.values())[0]
+
+    # 4. Generate & Sanitize final string output
+    loops = 0
     while True:
-        noun = random.choice(noun_pool)
-        adj = random.choice(adj_pool) if random.random() < 0.6 else ""
-        mat = random.choice(mat_pool) if random.random() < 0.4 else ""
-        prop = random.choice(prop_pool) if random.random() < 0.3 else ""
-        final_name = f"{adj} {mat} {noun} {prop}".strip().replace("  ", " ")
-        if len(final_name.split()) >= 2:
+        noun = random.choice(noun_pool) if noun_pool else "Item"
+        adj = random.choice(adj_pool) if (adj_pool and random.random() < 0.6) else ""
+        mat = random.choice(mat_pool) if (mat_pool and random.random() < 0.4) else ""
+        prop = random.choice(prop_pool) if (prop_pool and random.random() < 0.3) else ""
+        
+        final_name = " ".join(f"{adj} {mat} {noun} {prop}".split())
+        
+        loops += 1
+        if len(final_name.split()) >= 2 or loops > 20:
             return final_name
 
 def get_appropriate_display_id(cat_keys, target_ilvl, target_qual, target_inv_type): # Add argument
@@ -907,7 +942,7 @@ while True:
              item_material = 1
              item_sheath = 0
         cat_keys = (category["class"], category["subclass"])
-        generated_name = generate_item_name(cat_keys)
+        generated_name = generate_item_name((cat_keys[0], cat_keys[1], lookup_key[2]))
         display_obj = get_appropriate_display_id(cat_keys, ilvl, quality_code, category["InventoryType"])
         predicted_display_id = display_obj["id"]
         req_level = get_appropriate_req_level(cursor, ilvl, quality_code)
