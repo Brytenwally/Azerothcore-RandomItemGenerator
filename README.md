@@ -21,6 +21,11 @@ Dynamic Visuals: Automatically maps generated items to existing DisplayIDs based
 
 **How to use**
 
+Before anything else, install these dependencies if you don't have them
+
+```pip install joblib mysql-connector-python openpyxl pandas```
+
+
 
 
 1. Essential Startup Order
