@@ -23,7 +23,7 @@ except Exception as e:
 print("Step 2: Extracting baseline reference frames...")
 query = """
     SELECT entry, name, itemlevel, Quality, class, subclass, InventoryType, displayid, delay, 
-           dmg_min1, dmg_max1, armor, Material, sheath,
+           dmg_min1, dmg_max1, armor, Material, sheath, SellPrice,
            stat_type1, stat_value1, stat_type2, stat_value2, stat_type3, stat_value3, stat_type4, stat_value4,
            RandomProperty, RandomSuffix
     FROM item_template 
@@ -112,12 +112,21 @@ print(" -> Compiling Subclass Density Profile Tables...")
 lookup_database = {}
 for (cls, subcls, inv_type, qual), group in df.groupby(['class', 'subclass', 'InventoryType', 'Quality']):
     ilvl_sheet = []
+    group_valid_sell = group[group['SellPrice'] > 0]['SellPrice']
+    if not group_valid_sell.empty:
+        group_avg_sell = float(group_valid_sell.mean())
+    else:
+        # Fall back to matching class & subclass across all qualities/slots
+        subclass_valid_sell = df[(df['class'] == cls) & (df['subclass'] == subcls) & (df['SellPrice'] > 0)]['SellPrice']
+        group_avg_sell = float(subclass_valid_sell.mean()) if not subclass_valid_sell.empty else 500.0 # 5 silver base fallback
+    
     for ilvl, sub_group in group.groupby('itemlevel'):
         valid_dps_rows = sub_group[sub_group['dps'] > 0]['dps']
         avg_dps = float(valid_dps_rows.mean()) if not valid_dps_rows.empty else 0.0
         valid_armor_rows = sub_group[sub_group['armor'] > 0]['armor']
         avg_armor = float(valid_armor_rows.mean()) if not valid_armor_rows.empty else 0.0
-        
+        valid_sell_rows = sub_group[sub_group['SellPrice'] > 0]['SellPrice']
+        avg_sell_price = float(valid_sell_rows.mean()) if not valid_sell_rows.empty else group_avg_sell
         profiles = []
         for idx, row in sub_group.iterrows():
             rp, rs, n_stats = int(row['RandomProperty']), int(row['RandomSuffix']), int(row['num_stats'])
@@ -130,7 +139,7 @@ for (cls, subcls, inv_type, qual), group in df.groupby(['class', 'subclass', 'In
             ilvl_sheet.append({
                 "itemlevel": int(ilvl), "avg_dps": avg_dps, "avg_armor": avg_armor,
                 "display_ids": sub_group['displayid'].dropna().astype(int).unique().tolist(),
-                "stat_profiles": profiles
+                "stat_profiles": profiles, "avg_sell_price": avg_sell_price
             })
     ilvl_sheet = sorted(ilvl_sheet, key=lambda x: x['itemlevel'])
     lookup_database[(int(cls), int(subcls), int(inv_type), int(qual))] = ilvl_sheet
