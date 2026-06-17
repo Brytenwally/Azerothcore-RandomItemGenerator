@@ -27,6 +27,7 @@ try:
     global_budget_curves = master["global_budget_curves"]
     archetype_profiles = master["archetype_profiles"]
     name_database = master["name_database"]
+    subclass_delays = master.get("subclass_delays", {})
 except Exception as e:
     print("❌ Critical Error: Model components failed to load. Run train_brain.py first.")
     exit()
@@ -127,6 +128,26 @@ BLUEPRINTS = {
 }
 
 # (Helper functions interpolate_macro_budget, interpolate_local_dps, get_interpolated_properties remain same)
+def get_weapon_delay(category_data):
+    """
+    Fetches the database-calculated average speed for a weapon subclass,
+    applies a +/-15% swing variation, and snaps it cleanly to the nearest 100ms.
+    """
+    subclass = category_data["subclass"]
+    
+    # Grab the true average from the DBC/Database via train_brain. 
+    # Fallback to the hardcoded CATEGORIES delay if the dataset doesn't have it.
+    base_delay = subclass_delays.get(subclass, category_data["delay"])
+    
+    # Calculate 15% boundaries
+    min_delay = base_delay * 0.85
+    max_delay = base_delay * 1.15
+    
+    # Roll the randomized raw speed value
+    raw_delay = random.uniform(min_delay, max_delay)
+    
+    # Snap smoothly to the nearest 100ms step
+    return int(round(raw_delay / 100) * 100)
 def get_sheathe_type(cat):
     """
     Returns the Sheath ID based on WoW standards:
@@ -530,13 +551,22 @@ while True:
         final_budget = int(interpolated["avg_budget"] * fuzz_factor)
         final_dps = interpolated["avg_dps"] * fuzz_factor if category["class"] == 2 else 0.0
         
+        dynamic_delay = 0
+        if category["class"] == 2:
+            # Fallback to the hardcoded CATEGORIES configuration value if database lacks tracking 
+            base_delay = subclass_delays.get(category["subclass"], category.get("delay", 2600))
+            raw_delay = random.uniform(base_delay * 0.85, base_delay * 1.15)
+            dynamic_delay = int(round(raw_delay / 100) * 100) # Snap to clean hundredths
+
+        # --- DYNAMIC SWING RANGE DAMAGE CALCULATIONS ---
         dmg_min, dmg_max = 0, 0
         if category["class"] == 2 and final_dps > 0:
-            avg_damage = (final_dps * (category["delay"] / 1000.0))
+            # CHANGED: Replaced static category["delay"] with our randomized dynamic_delay
+            avg_damage = (final_dps * (dynamic_delay / 1000.0))
             spread_fuzz = random.uniform(-0.02, 0.02)
             dmg_min = int(avg_damage * (0.70 + spread_fuzz))
             dmg_max = int(avg_damage * (1.30 + spread_fuzz))
-            final_dps = round(((dmg_min + dmg_max) / 2) / (category["delay"] / 1000.0), 2)
+            final_dps = round(((dmg_min + dmg_max) / 2) / (dynamic_delay / 1000.0), 2)
 
         if interpolated["stat_profiles"]:
             chosen_profile = random.choice(interpolated["stat_profiles"])
@@ -653,7 +683,7 @@ while True:
         
         internal_memory.append({
     "config": category, "quality": quality_code, "ilvl": ilvl, "name": generated_name,
-    "displayid": predicted_display_id, "dmg_min": dmg_min, "dmg_max": dmg_max, "displayid": display_obj.get("id"), "display_source": display_obj,
+    "displayid": predicted_display_id, "dmg_min": dmg_min, "dmg_max": dmg_max, "displayid": display_obj.get("id"), "display_source": display_obj, "delay": dynamic_delay,
     "dps": final_dps, "armor": final_armor, # <--- ARMOR IS HERE, 
     "stats": stats, "RandomProperty": random_prop_id, "RandomSuffix": random_suff_id, "budget": final_budget, "required_level": req_level, "Material": item_material,
     "sheath": item_sheath
@@ -678,7 +708,7 @@ with open(output_filename, "w") as f:
         
         sql_string = f"""DELETE FROM `item_template` WHERE `entry` = {current_id};
 INSERT INTO `item_template` (`entry`, `class`, `subclass`, `name`, `displayid`, `Quality`, `InventoryType`, `itemlevel`, `RequiredLevel`, `armor`, `delay`, `dmg_min1`, `dmg_max1`, `dmg_type1`, `stat_type1`, `stat_value1`, `stat_type2`, `stat_value2`, `stat_type3`, `stat_value3`, `stat_type4`, `stat_value4`, `stat_type5`, `stat_value5`, `stat_type6`, `stat_value6`, `RandomProperty`, `RandomSuffix`, `Material`, `sheath`, `Description`) 
-VALUES ({current_id}, {c['class']}, {c['subclass']}, '{item['name']}', {item['displayid']}, {item['quality']}, {c['InventoryType']}, {item['ilvl']}, {item['required_level']}, {item.get('armor', 0)}, {c['delay']}, {item['dmg_min']}, {item['dmg_max']}, {c['dmg_type1']}, {s['stat_type1']}, {s['stat_value1']}, {s['stat_type2']}, {s['stat_value2']}, {s['stat_type3']}, {s['stat_value3']}, {s['stat_type4']}, {s['stat_value4']}, {s['stat_type5']}, {s['stat_value5']}, {s['stat_type6']}, {s['stat_value6']}, {item['RandomProperty']}, {item['RandomSuffix']}, {item['Material']}, {item['sheath']}, '{description}');\n"""
+VALUES ({current_id}, {c['class']}, {c['subclass']}, '{item['name']}', {item['displayid']}, {item['quality']}, {c['InventoryType']}, {item['ilvl']}, {item['required_level']}, {item.get('armor', 0)}, {item['delay']}, {item['dmg_min']}, {item['dmg_max']}, {c['dmg_type1']}, {s['stat_type1']}, {s['stat_value1']}, {s['stat_type2']}, {s['stat_value2']}, {s['stat_type3']}, {s['stat_value3']}, {s['stat_type4']}, {s['stat_value4']}, {s['stat_type5']}, {s['stat_value5']}, {s['stat_type6']}, {s['stat_value6']}, {item['RandomProperty']}, {item['RandomSuffix']}, {item['Material']}, {item['sheath']}, '{description}');\n"""
         f.write(sql_string)
         
         combat_info = f" ({item['dps']} DPS | Min-Max: {item['dmg_min']}-{item['dmg_max']})" if c['class'] == 2 else " (Armor Piece)"
