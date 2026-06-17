@@ -135,7 +135,7 @@ for (cls, subcls, inv_type, qual), group in df.groupby(['class', 'subclass', 'In
             elif row['total_budget'] > 0 and n_stats > 0:
                 profiles.append({"num_stats": n_stats, "RandomProperty": 0, "RandomSuffix": 0})
 
-        if not valid_dps_rows.empty or profiles:
+        if not valid_dps_rows.empty or avg_armor > 0 or profiles:
             ilvl_sheet.append({
                 "itemlevel": int(ilvl), "avg_dps": avg_dps, "avg_armor": avg_armor,
                 "display_ids": sub_group['displayid'].dropna().astype(int).unique().tolist(),
@@ -144,18 +144,97 @@ for (cls, subcls, inv_type, qual), group in df.groupby(['class', 'subclass', 'In
     ilvl_sheet = sorted(ilvl_sheet, key=lambda x: x['itemlevel'])
     lookup_database[(int(cls), int(subcls), int(inv_type), int(qual))] = ilvl_sheet
 
-# --- FIX: Imputation Layer (Filling missing categories) ---
-print(" -> Running Imputation Layer (Borrowing Ring stats for Cloaks)...")
-# Map: Source InventoryType (11=Rings) -> Target InventoryType (16=Cloaks)
-imputation_map = {11: 16}
+# --- Build per-slot stat profiles directly from real item data, for any ---
+# --- (class, subclass, InventoryType, Quality) combo the main pass above ---
+# --- left missing or empty (e.g. Cloaks with no stats, or sparsely-populated ---
+# --- Bow quality tiers).                                                    ---
+def build_slot_fallback(where_clause, label, is_weapon=False):
+    """
+    Pulls items directly from item_template matching `where_clause` and fills in
+    any lookup_database[(class, subclass, InventoryType, Quality)] entry that's
+    currently missing or empty.
 
-for (cls, subcls, inv_type, qual), ilvl_sheet in list(lookup_database.items()):
-    if inv_type in imputation_map:
-        target_inv_type = imputation_map[inv_type]
-        target_key = (cls, subcls, target_inv_type, qual)
-        if target_key not in lookup_database:
-            lookup_database[target_key] = ilvl_sheet
-            print(f"    [Impute] Mapped InvType {target_inv_type} from {inv_type} (Qual: {qual})")
+    NOTE: we check `lookup_database.get(target_key)` (truthy on a non-empty list)
+    rather than `target_key in lookup_database`. The main pass above always
+    inserts a key for every (class, subclass, InventoryType, Quality) combo it
+    sees -- even when that combo's ilvl_sheet ends up empty -- so a plain
+    "in lookup_database" check is always True and this fallback would never
+    actually run. This was the bug that silently broke Cloak generation.
+
+    is_weapon=True computes avg_dps from dmg_min1/dmg_max1/delay instead of
+    avg_armor (use this for ranged weapons like Bows; leave False for armor
+    slots like Cloaks).
+    """
+    print(f" -> Building {label} stat profiles from actual item data...")
+
+    conn2 = mysql.connector.connect(**db_config)
+    slot_query = f"""
+        SELECT entry, name, itemlevel, Quality, class, subclass, InventoryType, displayid, delay,
+               dmg_min1, dmg_max1, armor, Material, sheath, SellPrice,
+               stat_type1, stat_value1, stat_type2, stat_value2, stat_type3, stat_value3, stat_type4, stat_value4,
+               RandomProperty, RandomSuffix
+        FROM item_template
+        WHERE itemlevel BETWEEN 10 AND 284
+          AND {where_clause};
+    """
+    slot_df = pd.read_sql(slot_query, conn2)
+    conn2.close()
+
+    print(f"   Found {len(slot_df)} {label} templates. Building {label} lookup entries...")
+
+    slot_df['total_budget'] = slot_df['stat_value1'] + slot_df['stat_value2'] + slot_df['stat_value3'] + slot_df['stat_value4']
+    slot_df['num_stats'] = slot_df.apply(count_active_stats, axis=1)
+
+    slot_df['dps'] = 0.0
+    if is_weapon:
+        w_mask = slot_df['delay'] > 0
+        slot_df.loc[w_mask, 'dps'] = ((slot_df.loc[w_mask, 'dmg_min1'] + slot_df.loc[w_mask, 'dmg_max1']) / 2) / (slot_df.loc[w_mask, 'delay'] / 1000.0)
+
+    added = 0
+    for (cls, subcls, inv_type, qual), group in slot_df.groupby(['class', 'subclass', 'InventoryType', 'Quality']):
+        target_key = (int(cls), int(subcls), int(inv_type), int(qual))
+        if lookup_database.get(target_key):
+            continue  # Already populated with real, non-empty data; don't overwrite
+
+        ilvl_sheet = []
+        group_valid_sell = group[group['SellPrice'] > 0]['SellPrice']
+        group_avg_sell = float(group_valid_sell.mean()) if not group_valid_sell.empty else 500.0
+
+        for ilvl, sub_group in group.groupby('itemlevel'):
+            valid_dps_rows = sub_group[sub_group['dps'] > 0]['dps']
+            avg_dps = float(valid_dps_rows.mean()) if not valid_dps_rows.empty else 0.0
+            valid_armor_rows = sub_group[sub_group['armor'] > 0]['armor']
+            avg_armor = float(valid_armor_rows.mean()) if not valid_armor_rows.empty else 0.0
+            valid_sell_rows = sub_group[sub_group['SellPrice'] > 0]['SellPrice']
+            avg_sell_price = float(valid_sell_rows.mean()) if not valid_sell_rows.empty else group_avg_sell
+
+            profiles = []
+            for idx, row in sub_group.iterrows():
+                rp, rs, n_stats = int(row['RandomProperty']), int(row['RandomSuffix']), int(row['num_stats'])
+                if rp != 0 or rs != 0:
+                    profiles.append({"num_stats": 0, "RandomProperty": rp, "RandomSuffix": rs})
+                elif row['total_budget'] > 0 and n_stats > 0:
+                    profiles.append({"num_stats": n_stats, "RandomProperty": 0, "RandomSuffix": 0})
+
+            if profiles or avg_armor > 0 or avg_dps > 0:
+                ilvl_sheet.append({
+                    "itemlevel": int(ilvl), "avg_dps": avg_dps, "avg_armor": avg_armor,
+                    "display_ids": sub_group['displayid'].dropna().astype(int).unique().tolist(),
+                    "stat_profiles": profiles, "avg_sell_price": avg_sell_price
+                })
+
+        if ilvl_sheet:
+            lookup_database[target_key] = sorted(ilvl_sheet, key=lambda x: x['itemlevel'])
+            added += 1
+            print(f"    [{label}] Added cls={cls}, subcls={subcls}, inv={inv_type}, qual={qual} ({len(ilvl_sheet)} ilvl entries)")
+
+    print(f"   {label}: {added} (class, subclass, slot, quality) combination(s) filled in.")
+
+# Cloak / Back slot (InventoryType 16)
+build_slot_fallback("InventoryType = 16", "Cloak", is_weapon=False)
+
+# Bow (class 2, subclass 2) -- ranged weapon, computed via dps instead of armor
+build_slot_fallback("class = 2 AND subclass = 2", "Bow", is_weapon=True)
 
 print("Step 3: Compiling Structural Naming Dictionaries...")
 
