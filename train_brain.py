@@ -252,6 +252,377 @@ PROPERTY_WHITELIST = [
     "of the Protector", "of the Warlord", "of the Warden", 
     "of the Exile", "of the Renegade"
 ]
+WEAPON_NOUNS = {
+    # --- 0: One-Handed Axes ---
+    0: [
+        "Axe", "Cleaver", "Hacker", "Handaxe", "Chopper", "Edge", "Sickle", "Slicer",
+        "Hatchet", "Reaver", "Splitter", "Tomahawk", "Render", "Butcher", "Ripper", 
+        "Mutilator", "Beheader", "Crescent", "Francisca", "Skinner", "Gouger", 
+        "Hedge-Axe", "Warmonger", "Huntsman", "Bone-Chopper", "Blood-Axe", "Ravager",
+        "Incisor", "Viper-Tooth", "Flayer", "Skin-Peeler", "Carver"
+    ],
+    
+    # --- 1: Two-Handed Axes ---
+    1: [
+        "Greataxe", "Battleaxe", "Decapitator", "Cleaver", "Reaper", "Doom-Axe", "Edge", "Ravager", "Sunderer",
+        "Labrys", "Guillotine", "Executioner", "Earth-Cleaver", "World-Carver", "Star-Sunderer", 
+        "Broadaxe", "Behemoth", "Dread-Axe", "Bone-Grinder", "Spine-Splitter", "Crescent-Axe", 
+        "Harbinger", "Mountain-Cleaver", "Gorgon-Edge", "Titan-Axe", "Skull-Cleaver", 
+        "Doom-Bringer", "Revenant", "Hell-Axe", "Warmaster", "Annihilator", "World-Breaker"
+    ],
+    
+    # --- 2: Bows ---
+    2: [
+        "Bow", "Longbow", "Composite Bow", "Shortbow", "Recurve Bow", "Stinger", "Greatbow",
+        "Reflex Bow", "Warbow", "Star-Bow", "Wind-Bow", "Piercer", "Rain-Maker", "Arrow-Launcher", 
+        "Sky-Piercer", "Swift-Bow", "Storm-String", "Whisper-Bow", "Gale-Bow", "Hunter-Bow", 
+        "Viper", "Eagle-Strike", "Heart-Piercer", "Shadow-String", "Tendon-Snap", "Stalker-Bow", 
+        "Flurry-Bow", "Needler", "Striker", "Night-Bow", "Sinew-Snap"
+    ],
+    
+    # --- 3: Guns ---
+    3: [
+        "Rifle", "Musket", "Shotgun", "Blunderbuss", "Handcannon", "Carbine", "Repeater", "Fusil",
+        "Firelock", "Matchlock", "Flintlock", "Arquebus", "Culverin", "Cannon", "Thunderbuss", 
+        "Volleygun", "Lead-Spitter", "Boomstick", "Iron-Tube", "Pistol", "Arbalest-Gun", 
+        "Fire-Spitter", "Powder-Keg", "Blast-Rifle", "Storm-Rifle", "Siege-Musket", 
+        "Hand-Mortar", "Gatling", "Spitfire", "Flint-Rifle", "Thunder-Pipe"
+    ],
+    
+    # --- 4: One-Handed Maces ---
+    4: [
+        "Mace", "Gavel", "Club", "Hammer", "Cudgel", "Bludgeon", "Scepter", "Truncheon",
+        "Flail", "Morgenstern", "Morningstar", "Warmace", "Skull-Crusher", "War-Club", 
+        "Mallet", "Knocker", "Pummel", "Bludgeoner", "Sceptre", "Sledge", "Bone-Cracker", 
+        "Crest-Mace", "Anvil-Hand", "Mauler", "Spike-Gavel", "Smacker", "Thumper",
+        "Tenderizer", "Smasher", "Cracker", "Weight"
+    ],
+    
+    # --- 5: Two-Handed Maces ---
+    5: [
+        "Greatmace", "Maul", "Warhammer", "Pummel", "Scepter", "Pounder", "World-Breaker",
+        "Great-Maul", "Earth-Shaker", "Skull-Smasher", "Stone-Breaker", "Dread-Maul", 
+        "Anvil-Hammer", "Juggernaut", "Titan-Maul", "Demolisher", "Battering-Ram", 
+        "World-Ender", "Bone-Smasher", "Calamity", "Iron-Maul", "Goliath", "Megalith", 
+        "Cataclysm", "Obliterator", "Pillar-Hammer", "Mountain-Smasher", "Titan-Gavel"
+    ],
+    
+    # --- 6: Polearms ---
+    6: [
+        "Polearm", "Halberd", "Scythe", "Spear", "Pike", "Glaive", "Lance",
+        "Bardiche", "Billhook", "Naginata", "Partisan", "Guisarme", "Lochaber Axe", 
+        "Voulge", "Trident", "Spetum", "Ranseur", "Harpoon", "Brandestock", "Corseques", 
+        "Sovnya", "Falx", "Glaive-Gisarme", "Pike-Staff", "Sky-Lighter", "Spire-Spear", 
+        "Wyrm-Stalker", "Stinger-Pole", "Reap-Blade", "Death-Scythe"
+    ],
+    
+    # --- 7: One-Handed Swords ---
+    7: [
+        "Sword", "Blade", "Longsword", "Saber", "Rapier", "Scimitar", "Slicer", "Quickblade",
+        "Cutlass", "Falchion", "Gladius", "Shortsword", "Shamshir", "Spatha", "Estoc", 
+        "Foil", "Wakizashi", "Carver", "Edge", "Broadsword", "Scian", "Brand", "Spitfire", 
+        "Skewer", "Razor", "Stitcher", "Spine-Seeker", "Talwar", "Flesh-Render", 
+        "Dirk-Sword", "Swift-Blade"
+    ],
+    
+    # --- 8: Two-Handed Swords ---
+    8: [
+        "Greatsword", "Claymore", "Runeblade", "Broadsword", "Bastard Sword", "Edge", "Warblade",
+        "Flamberge", "Zweihander", "Executioner's Sword", "Dread-Blade", "Sun-Blade", 
+        "Doom-Slayer", "Void-Shearer", "Grand-Blade", "Avenger", "Colossus", 
+        "Warmonger-Blade", "Souldrinker", "Lifedrinker", "Ender", "Dark-Blade", 
+        "Gargoyle-Edge", "Titan-Blade", "Doomsday", "World-Carver"
+    ],
+    
+    # --- 10: Staves ---
+    10: [
+        "Staff", "Spire", "Pillar", "Greatstaff", "Stave",
+        "Quarterstaff", "Crook", "Rod", "Scepter", "Walking-Stick", "Arch-Stave", 
+        "Conduit", "Focus", "Channeler", "Brazier", "Cane", "Gnarled-Staff", 
+        "Grand-Staff", "Beacon", "Spindle", "Oracle-Staff", "Sage-Stave", "Totem",
+        "Light-Wand", "World-Pillar", "Elder-Staff", "Walking-Stave"
+    ],
+    
+    # --- 13: Fist Weapons ---
+    13: [
+        "Claw", "Talons", "Katar", "Fist", "Blades",
+        "Tekko", "Cestus", "Bagh Nakh", "Knuckles", "Puncher", "Render", "Shredder", 
+        "Bladed Gauntlet", "Spiked Fist", "Grip", "Pugilist", "Mauler-Grip", 
+        "Tiger-Claw", "Razor-Fist", "Scrape", "Ripper-Fist", "Viper-Bite", "Talons-Grip"
+    ],
+    
+    # --- 15: Daggers ---
+    15: [
+        "Dagger", "Dirk", "Kris", "Shanker", "Stiletto", "Blade", "Carver", "Spike",
+        "Baselard", "Rondel", "Pugio", "Main-Gauche", "Poignard", "Bodkin", "Tooth", 
+        "Fang", "Shard", "Splinter", "Needle", "Bodkin-Blade", "Skewer", "Stitcher", 
+        "Venom-Tooth", "Razor-Shard", "Spit", "Letter-Opener", "Thorn", "Incisor", 
+        "Sliver", "Quill-Blade"
+    ],
+    
+    # --- 16: Thrown ---
+    16: [
+        "Darts", "Throwing Axe", "Glaive", "Knives", "Spikes",
+        "Shuriken", "Kunai", "Throwing Knife", "Boomerang", "Javelin", "Dart", 
+        "Throwing Star", "Francisca", "Harpoon", "Quill", "Spitfire-Dart", 
+        "Plumbata", "Chakram", "Bolos", "Sling-Stone"
+    ],
+    
+    # --- 18: Crossbows ---
+    18: [
+        "Crossbow", "Arbalest", "Repeater",
+        "Heavy Crossbow", "Light Crossbow", "Ballesta", "Gastraphetes", 
+        "Bolt-Thrower", "Siege-Crossbow", "Quick-Crossbow", "Wind-Crossbow", 
+        "Arbalest-Bow", "Steel-String", "Snapper", "Quarrel-Launcher"
+    ],
+    
+    # --- 19: Wands ---
+    19: [
+        "Wand", "Baton", "Rod", "Scepter",
+        "Twig", "Pointer", "Focus-Wand", "Core", "Ignite-Stick", "Sparker", 
+        "Channeling Wand", "Prism", "Sceptre", "Dowser", "Conductor", 
+        "Spindle-Wand", "Beam-Stick", "Emberspire", "Frost-Shard", "Crystalline-Wand"
+    ]
+}
+ARMOR_NOUNS = {
+    # === 1: HEAD GEAR ===
+    1: {
+        # Cloth
+        1: [
+            "Hood", "Cowl", "Hat", "Cap", "Circlet", "Crown", "Tiara", "Diadem", "Headdress", 
+            "Veil", "Coif", "Gaze", "Halo", "Cover", "Mask", "Turban", "Feather-Hat", "Keffiyeh",
+            "Goggles", "Crown-Circlet", "Monocle", "Blindfold", "Amice-Hood", "Visage"
+        ], 
+        # Leather
+        2: [
+            "Helm", "Cap", "Headguard", "Mask", "Hood", "Cowl", "Eyepatch", "Bandana", "Visor", 
+            "Headband", "Cover", "Crown", "Headdress", "Faceguard", "Goggles", "Stalker-Mask", 
+            "Wolf-Head", "Hide-Cap", "Facemask", "Trophy-Head", "Slayer-Helm", "Guise"
+        ], 
+        # Mail
+        3: [
+            "Helm", "Coif", "Headpiece", "Headguard", "Faceguard", "Coif-Helm", "Mask", "Crown", 
+            "Visor", "Bascinet", "Casque", "Greathelm", "Camail", "Barbuta", "Sallet-Mail", 
+            "Chain-Helm", "Crest-Helm", "Ring-Coif", "Iron-Mask", "War-Helm", "Champion-Helm"
+        ], 
+        # Plate
+        4: [
+            "Helm", "Helmet", "Faceguard", "Crown", "Greathelm", "Visor", "Armet", "Sallet", 
+            "Bascinet", "Casque", "Crest", "Barbute", "Morion", "Headguard", "Burgonet", 
+            "Close-Helm", "Iron-Crown", "Vanguard-Helm", "Siege-Helm", "Juggernaut-Helm", 
+            "Bulwark-Face", "Dread-Helm", "Doom-Visor", "War-Visard"
+        ]
+    },
+    
+    # === 2: NECK ACCESSORIES ===
+    2: {
+        0: [
+            "Amulet", "Choker", "Necklace", "Pendant", "Chain", "Collar", "Talisman", "Gorget", 
+            "Torc", "Locket", "Scarab", "Medallion", "Brooch", "Strand", "Cameo", "Beads", 
+            "Charm", "Rosary", "Periapt", "Neck-Ribbon", "Grip-Choker", "Heart-Pendant",
+            "Signet-Necklace", "Star-Amulet", "Relic-Chain"
+        ]
+    },
+    
+    # === 3: SHOULDERS ===
+    3: {
+        # Cloth
+        1: [
+            "Amice", "Mantle", "Shoulderpads", "Pads", "Epaulets", "Shawl", "Wrap", "Capelet", 
+            "Cowl-Pads", "Pauldrons", "Monk-Shoulders", "Shoulder-Shroud", "Brooch-Shoulders",
+            "Wings", "Arch-Epaulets", "Tier-Mantle"
+        ], 
+        # Leather
+        2: [
+            "Mantle", "Shoulderpads", "Spaulders", "Pads", "Epaulets", "Shoulderguards", 
+            "Hide-Spaulders", "Pauldrons", "Wraps", "Guards", "Bark-Spaulders", "Stalker-Pads",
+            "Monk-Mantle", "Rogue-Shoulders", "Spikes", "Skin-Mantle"
+        ], 
+        # Mail
+        3: [
+            "Pauldrons", "Shoulders", "Spaulders", "Shoulderguards", "Epaulets", "Plates", 
+            "Mantle", "Guards", "Chain-Shoulders", "Ring-Spaulders", "Crest-Pauldrons", 
+            "Scale-Shoulders", "Iron-Mantle", "Storm-Shoulders", "Champion-Spaulders"
+        ], 
+        # Plate
+        4: [
+            "Pauldrons", "Shoulders", "Spaulders", "Plated Spaulders", "Shoulderguards", 
+            "Monoliths", "Wardens", "Epaulets", "Mantlets", "Guards", "Plates", "Iron-Shoulders",
+            "Citadel-Spaulders", "Dread-Pauldrons", "Gargoyle-Plates", "Titan-Shoulders", 
+            "Buldwar-Spaulders", "Siege-Pauldrons", "Juggernaut-Shoulders"
+        ]
+    },
+    
+    # === 16: BACK (CLOAKS) ===
+    16: {
+        0: [
+            "Cloak", "Cape", "Drape", "Shroud", "Shawl", "Greatcloak", "Mantle", "Wrap", 
+            "Canopy", "Sail", "Banner", "Pennant", "Scarf", "Pelisse", "Furl", "Blanket", 
+            "Skin-Cloak", "Wind-Drape", "Shadow-Shroud", "Glory-Cape"
+        ]
+    },
+    
+    # === 5: CHEST PIECES ===
+    5: {
+        # Cloth
+        1: [
+            "Robe", "Vestments", "Tunic", "Garments", "Gown", "Vest", "Blouse", "Shirt", 
+            "Raiment", "Shroud", "Wrap", "Habit", "Tabard", "Jerkin", "Kirtle", "Doublet", 
+            "Surcoat", "Soutane", "Cassock", "Chasuble", "Cloth-Armor"
+        ], 
+        # Leather
+        2: [
+            "Tunic", "Vest", "Chestguard", "Jerkin", "Harness", "Jacket", "Leather-Coat", 
+            "Raiment", "Garb", "Vestments", "Breastplate", "Wrap", "Brigandine", "Coat", 
+            "Cuirass", "Hide-Armor", "Chestpiece", "Stalker-Vest", "Trapper-Coat"
+        ], 
+        # Mail
+        3: [
+            "Hauberk", "Chainshirt", "Chestguard", "Vest", "Cuirass", "Tunica", "Ring-Mail", 
+            "Scale-Coat", "Jerkin", "Harness", "Chainmail", "Byrnie", "Coat-of-Mail", 
+            "Lorica", "Iron-Hauberk", "War-Shirt", "Slayer-Hauberk", "Champion-Mail"
+        ], 
+        # Plate
+        4: [
+            "Breastplate", "Chestplate", "Cuirass", "Carapace", "Platemail", "Chestguard", 
+            "Bulwark", "Aegis-Plate", "Harness", "Brigandine", "Plated-Harness", "Chestpiece",
+            "Citadel-Plate", "Dread-Plate", "Juggernaut-Plates", "Titan-Breastplate", 
+            "Vanguard-Plate", "Doom-Platemail", "Centurion-Armor"
+        ]
+    },
+    
+    # === 20: ROBES (FULL-BODY LORE WRAPS) ===
+    20: {
+        1: [
+            "Robe", "Vestments", "Gown", "Raiment", "Habit", "Shroud", "Garments", 
+            "Cassock", "Attire", "Kirtle-Robe", "Chasuble", "Grand-Robe", "Arch-Vestments", 
+            "High-Robe", "Sorcerer-Gown", "Acolyte-Shroud", "Oracle-Robe"
+        ]
+    },
+    
+    # === 9: WRISTS (BRACERS) ===
+    9: {
+        0: [
+            "Bracers", "Bindings", "Armguards", "Cuffs", "Bands", "Wristbands", "Vambraces", 
+            "Shackles", "Wristguards", "Manacles", "Wraps", "Armbands", "Bracelets", 
+            "Wrist-Plates", "Chain-Links", "Leather-Wraps", "Runed-Bracers", "Grips", 
+            "Anklets-Wrist", "Forearm-Guards"
+        ]
+    },
+    
+    # === 10: HANDS ===
+    10: {
+        # Cloth
+        1: [
+            "Gloves", "Handwraps", "Mittens", "Handguards", "Wraps", "Mitts", "Touch-Gloves", 
+            "Spell-Weaves", "Silk-Gloves"
+        ], 
+        # Leather
+        2: [
+            "Gloves", "Handguards", "Grips", "Handwraps", "Mitts", "Clutches", "Gauntlets", 
+            "Stalker-Gloves", "Hide-Grips", "Fingerless-Gloves", "Fist-Wraps"
+        ], 
+        # Mail
+        3: [
+            "Gauntlets", "Handguards", "Gloves", "Grips", "Chain-Gloves", "Scale-Guards", 
+            "Ring-Gauntlets", "Iron-Grips", "War-Gloves"
+        ], 
+        # Plate
+        4: [
+            "Gauntlets", "Handguards", "Gloves", "Fists", "Iron-Grips", "Crushers", 
+            "Plate-Gloves", "Vanguard-Gauntlets", "Heavy-Fists", "Doom-Gauntlets", 
+            "Slam-Grips", "Titan-Gauntlets", "Citadel-Gauntlets"
+        ]
+    },
+    
+    # === 6: WAIST (BELTS) ===
+    6: {
+        0: [
+            "Girdle", "Belt", "Cinch", "Cord", "Sash", "Clasp", "Buckle", "Strap", 
+            "Cummerbund", "Waistband", "Chain-Belt", "Girth", "Waistguard", "Leather-Strap", 
+            "Links", "Waist-Rope", "Heavy-Belt", "Buckled-Girdle", "Runed-Sash"
+        ]
+    },
+    
+    # === 7: LEGS ===
+    7: {
+        # Cloth
+        1: [
+            "Trousers", "Leggings", "Pants", "Breeches", "Skirt", "Kilt", "Pantaloons", 
+            "Slacks", "Wraps", "Drawers", "Loincloth", "Saron", "Hakama", "Cloth-Legs"
+        ], 
+        # Leather
+        2: [
+            "Legguards", "Leggings", "Breeches", "Pants", "Trousers", "Chaps", "Shorts", 
+            "Skirt", "Kilt", "Hide-Legs", "Padded-Pants", "Trapper-Legs", "Stalker-Guards"
+        ], 
+        # Mail
+        3: [
+            "Legguards", "Leggings", "Kilt", "Chain-Legs", "Skirt", "Hauberk-Legs", 
+            "Chausses", "Breeches", "Ring-Leggings", "Scale-Legguards", "Iron-Kilt", 
+            "War-Legguards"
+        ], 
+        # Plate
+        4: [
+            "Legplates", "Greaves", "Legguards", "Cuisses", "Tassets", "Plate-Pants", 
+            "Guards", "Chausses", "Schynbalds", "Citadel-Legplates", "Dread-Plates", 
+            "Titan-Greaves", "Bulwark-Legs", "Juggernaut-Plates", "Vanguard-Greaves"
+        ]
+    },
+    
+    # === 8: FEET (BOOTS) ===
+    8: {
+        # Cloth
+        1: [
+            "Boots", "Slippers", "Sandals", "Footpads", "Shoes", "Footwraps", "Soles", 
+            "Treads", "Socks", "Pumps", "Soft-Boots"
+        ], 
+        # Leather
+        2: [
+            "Boots", "Footguards", "Shoes", "Moccasins", "Treads", "Soles", "Footpads", 
+            "Walkers", "Striders", "Stalker-Boots", "Hide-Walkers", "Muck-Boots"
+        ], 
+        # Mail
+        3: [
+            "Boots", "Greaves", "Footguards", "Sabatons", "Striders", "Treads", "Walkers", 
+            "Chain-Boots", "Ring-Greaves", "Iron-Boots", "Scale-Boots"
+        ], 
+        # Plate
+        4: [
+            "Boots", "Sabatons", "Greaves", "Footguards", "Iron-Boots", "Soles", "Spur-Boots", 
+            "Citadel-Boots", "Dread-Sabatons", "Juggernaut-Greaves", "Vanguard-Boots", 
+            "Titan-Sabatons", "Heavy-Treads"
+        ]
+    },
+    
+    # === 11: FINGERS (RINGS) ===
+    11: {
+        0: [
+            "Band", "Ring", "Signet", "Loop", "Seal", "Circle", "Promise", "Wedding-Band", 
+            "Jewel", "Knot-Ring", "Coil", "Spiral", "Claw-Ring", "Stone-Band", "Insignia-Ring"
+        ]
+    },
+    
+    # === 14: SHIELDS ===
+    14: {
+        0: [
+            "Shield", "Bulwark", "Barrier", "Aegis", "Buckler", "Crest", "Kite-Shield", 
+            "Pavise", "Targe", "Round-Shield", "Greatshield", "Wall", "Ward", "Safeguard", 
+            "Protector", "Blocker", "Heater-Shield", "Barricade", "Tower-Shield", "Carapace-Shield", 
+            "Gargoyle-Wing", "Anvil-Shield", "Bastion", "Gladiator-Shield"
+        ]
+    },
+    
+    # === 23: HELD IN HAND (OFF-HANDS) ===
+    23: {
+        0: [
+            "Tome", "Orb", "Grimoire", "Scroll", "Star", "Compendium", "Book", "Ledger", 
+            "Eye", "Icon", "Idol", "Relic", "Talisman", "Scepter", "Branch", "Totem", 
+            "Beacon", "Fragment", "Catalyst", "Manual", "Journal", "Prism", "Battery", 
+            "Globe", "Chalice", "Urn", "Fetish", "Lamp", "Censer", "Glow-Stone"
+        ]
+    }
+}
 name_database = {}
 for (cls, subcls), group in df.groupby(['class', 'subclass']):
     nouns = set()
@@ -320,7 +691,9 @@ master_brain = {
     "global_budget_curves": global_budget_curves,
     "archetype_profiles": archetype_profiles,
     "name_database": name_database,
-    "subclass_delays": subclass_delays
+    "subclass_delays": subclass_delays,
+    "weapon_nouns": WEAPON_NOUNS,     
+    "armor_nouns": ARMOR_NOUNS        
 }
 joblib.dump(master_brain, "blizzlike_master_brain.pkl")
 print("🎉 Success! Cohesive Archetype Matrix successfully compiled and exported.")
