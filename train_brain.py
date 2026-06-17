@@ -2,7 +2,7 @@ import mysql.connector
 import pandas as pd
 import joblib
 import warnings
-material_library = joblib.load('material_library.joblib')
+
 warnings.filterwarnings("ignore")
 
 print("Step 1: Connecting to AzerothCore Database...")
