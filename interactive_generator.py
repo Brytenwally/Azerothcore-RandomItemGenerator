@@ -4,6 +4,9 @@ import os
 import warnings
 import mysql.connector
 import csv
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
 material_library = joblib.load('material_library.joblib')
 warnings.filterwarnings("ignore")
 
@@ -128,6 +131,189 @@ BLUEPRINTS = {
 }
 
 # (Helper functions interpolate_macro_budget, interpolate_local_dps, get_interpolated_properties remain same)
+def export_to_excel_tooltips(internal_memory, filename="generated_items_tooltips.xlsx"):
+    """
+    Generates an authentic dark-themed Excel sheet styling items as Blizzard tooltips
+    by dynamically tracking and outlining each item card.
+    """
+    if not internal_memory:
+        print("⚠️ Core collection cache array is empty. No Excel file created.")
+        return
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Item Tooltips"
+    
+    # Keep grid lines visible to maintain spreadsheet utility
+    ws.views.sheetView[0].showGridLines = True
+    
+    # Hex mapping for Blizzard item quality font strings
+    QUALITY_COLORS = {
+        0: "9D9D9D",  # Poor / Grey
+        1: "FFFFFF",  # Common / White
+        2: "1EFF00",  # Uncommon / Green
+        3: "0070DD",  # Rare / Blue
+        4: "A335EE",  # Epic / Purple
+        5: "FF8000"   # Legendary / Orange
+    }
+    
+    # Human-readable InventoryType Slot tags
+    SLOT_NAMES = {
+        1: "Head", 2: "Neck", 3: "Shoulder", 5: "Chest", 6: "Waist", 7: "Legs", 
+        8: "Feet", 9: "Wrist", 10: "Hands", 11: "Finger", 12: "Trinket", 
+        13: "One-Hand", 14: "Shield", 15: "Ranged", 16: "Back", 17: "Two-Hand", 
+        20: "Chest", 21: "Main-Hand", 22: "Off-Hand", 23: "Held In Off-Hand", 
+        25: "Thrown", 26: "Ranged"
+    }
+    
+    # Subclass text parser mappings
+    SUBCLASS_NAMES = {
+        2: {0: "Axe", 1: "Two-Handed Axe", 2: "Bow", 3: "Gun", 4: "Mace", 5: "Two-Handed Mace", 6: "Polearm", 7: "Sword", 8: "Two-Handed Sword", 10: "Staff", 13: "Fist Weapon", 15: "Dagger", 16: "Thrown", 18: "Crossbow", 19: "Wand"},
+        4: {0: "Miscellaneous", 1: "Cloth", 2: "Leather", 3: "Mail", 4: "Plate", 6: "Shield"}
+    }
+
+    bg_fill = PatternFill(start_color="111216", end_color="111216", fill_type="solid")
+    thin_grey = Side(border_style="thin", color="3A3F4D")
+    
+    current_row = 2  # Start row coordinate position
+    
+    for item in internal_memory:
+        c = item["config"]
+        q_code = item.get("quality", 2)
+        q_color = QUALITY_COLORS.get(q_code, "FFFFFF")
+        
+        start_row = current_row  # Track where this specific item box begins
+        
+        # Helper inner function to write background-painted rows smoothly
+        def write_row(val_left, val_right=None, font_left=None, font_right=None, merge_all=False):
+            nonlocal current_row
+            for col in range(2, 6):
+                ws.cell(row=current_row, column=col).fill = bg_fill
+                
+            if merge_all:
+                ws.merge_cells(start_row=current_row, start_column=2, end_row=current_row, end_column=5)
+                cell = ws.cell(row=current_row, column=2, value=val_left)
+                if font_left: cell.font = font_left
+            else:
+                ws.merge_cells(start_row=current_row, start_column=2, end_row=current_row, end_column=3)
+                cell_l = ws.cell(row=current_row, column=2, value=val_left)
+                if font_left: cell_l.font = font_left
+                
+                ws.merge_cells(start_row=current_row, start_column=4, end_row=current_row, end_column=5)
+                cell_r = ws.cell(row=current_row, column=4, value=val_right)
+                if font_right: cell_r.font = font_right
+                cell_r.alignment = Alignment(horizontal="right")
+            current_row += 1
+
+        # 1. Item Name Header
+        write_row(item["name"], font_left=Font(name="Calibri", size=13, bold=True, color=q_color), merge_all=True)
+        
+        # 2. Item Level Line
+        write_row(f"Item Level {item['ilvl']}", font_left=Font(name="Calibri", size=10, bold=True, color="FFD100"), merge_all=True)
+        
+        # 3. Binding Text Rule
+        bind_text = "Binds when picked up" if q_code >= 2 else "Binds when equipped"
+        write_row(bind_text, font_left=Font(name="Calibri", size=10, color="FFFFFF"), merge_all=True)
+        
+        # 4. Slot Type vs Equipment Class Split Line
+        slot_str = SLOT_NAMES.get(c["InventoryType"], "Equippable")
+        sub_str = SUBCLASS_NAMES.get(c["class"], {}).get(c["subclass"], "")
+        write_row(slot_str, sub_str, font_left=Font(name="Calibri", size=10, color="FFFFFF"), font_right=Font(name="Calibri", size=10, color="FFFFFF"))
+        
+        # 5. Weapon Combat Metrics Panel Split
+        if c["class"] == 2:
+            dmg_str = f"{item['dmg_min']} - {item['dmg_max']} Damage"
+            speed_str = f"Speed {item['delay']/1000:.2f}"
+            write_row(dmg_str, speed_str, font_left=Font(name="Calibri", size=10, color="FFFFFF"), font_right=Font(name="Calibri", size=10, color="FFFFFF"))
+            
+            dps_str = f"({item['dps']:.1f} damage per second)"
+            write_row(dps_str, font_left=Font(name="Calibri", size=10, color="FFFFFF"), merge_all=True)
+            
+        # 6. Armor Mitigation Value Panel
+        elif c["class"] == 4 and item.get("armor", 0) > 0:
+            write_row(f"{item['armor']} Armor", font_left=Font(name="Calibri", size=10, color="FFFFFF"), merge_all=True)
+            
+        # 7. Attributes Allocation Parser (Forcing Primary over Secondary)
+        stats_data = item.get("stats", {})
+        processed_stats = []
+        
+        if isinstance(stats_data, dict):
+            if "stat_type1" in stats_data:
+                for i in range(1, 11):
+                    st = stats_data.get(f"stat_type{i}", 0)
+                    sv = stats_data.get(f"stat_value{i}", 0)
+                    if st != 0 and sv != 0: processed_stats.append((st, sv))
+            else:
+                for st, sv in stats_data.items():
+                    if int(st) != 0 and int(sv) != 0: processed_stats.append((int(st), int(sv)))
+
+        # Separate into prioritized display buckets based on text color rules
+        white_stats = []
+        green_stats = []
+
+        for s_type, s_val in processed_stats:
+            if s_type in STAT_NAMES:
+                stat_name, stat_group = STAT_NAMES[s_type]
+                stat_color = "00FF00" if stat_group == "Secondary" else "FFFFFF"
+                
+                # Format textual rules ahead of time
+                if stat_group == "Secondary" and s_type != 38: # Attack Power behaves like a primary text layout
+                    display_value = f"Equip: Increases {stat_name} by {s_val}."
+                else:
+                    display_value = f"+{s_val} {stat_name}"
+                
+                # Append to respective bucket
+                if stat_color == "FFFFFF":
+                    white_stats.append((display_value, stat_color))
+                else:
+                    green_stats.append((display_value, stat_color))
+
+        # Render White Primaries completely before Green Secondaries
+        for display_value, color in (white_stats + green_stats):
+            write_row(display_value, font_left=Font(name="Calibri", size=10, color=color), merge_all=True)
+
+        # 8. Durability Frame Line
+        write_row("Durability 120 / 120", font_left=Font(name="Calibri", size=10, color="FFFFFF"), merge_all=True)
+        
+        # 9. Character Level Prerequisite Restrictions
+        write_row(f"Requires Level {item['required_level']}", font_left=Font(name="Calibri", size=10, color="FFFFFF"), merge_all=True)
+        
+        # (Note: Step 10 'Chance on hit' lore block removed from sequence successfully)
+            
+        # 11. Sell Price Node Breakdown Matrix (Gold, Silver, Copper Calculations)
+        raw_copper = item.get("sell_price", 0)
+        gold = int(raw_copper // 10000)
+        silver = int((raw_copper % 10000) // 100)
+        copper = int(raw_copper % 100)
+        
+        price_str = "Sell Price: "
+        if gold > 0: price_str += f"{gold}g "
+        if silver > 0 or gold > 0: price_str += f"{silver}s "
+        price_str += f"{copper}c"
+        write_row(price_str, font_left=Font(name="Calibri", size=10, color="FFFFFF"), merge_all=True)
+        
+        # 12. Draw outer bounding borders around the item container block
+        for r in range(start_row, current_row):
+            for col in range(2, 6):
+                cell = ws.cell(row=r, column=col)
+                cell.border = Border(
+                    left=thin_grey if col == 2 else None,
+                    right=thin_grey if col == 5 else None,
+                    top=thin_grey if r == start_row else None,
+                    bottom=thin_grey if r == current_row - 1 else None
+                )
+                
+        current_row += 3  # Insert spacing margin rows between rendered card boxes
+
+    # Fix aspect column scaling parameters
+    ws.column_dimensions['A'].width = 3
+    ws.column_dimensions['B'].width = 16
+    ws.column_dimensions['C'].width = 14
+    ws.column_dimensions['D'].width = 14
+    ws.column_dimensions['E'].width = 16
+    
+    wb.save(filename)
+    print(f"📦 Excel Tooltip Sheet successfully written to system workspace: {filename}")
 def get_dynamic_sell_price(sheet, ilvl):
     """
     Finds the closest item level nodes in the sheet and returns the 
@@ -820,3 +1006,7 @@ with open(csv_filename, "w", newline='') as f:
         ])
 
 print(f"✅ CSV export successful!")
+print("🏁 Generation complete! compiling Excel tooltips sheet...")
+
+# ⚡ Call the tooltips function directly here without any 'except' statement:
+export_to_excel_tooltips(internal_memory, filename="generated_items_tooltips.xlsx")
