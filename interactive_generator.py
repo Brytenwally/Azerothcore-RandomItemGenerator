@@ -128,6 +128,55 @@ BLUEPRINTS = {
 }
 
 # (Helper functions interpolate_macro_budget, interpolate_local_dps, get_interpolated_properties remain same)
+def get_dynamic_sell_price(sheet, ilvl):
+    """
+    Finds the closest item level nodes in the sheet and returns the 
+    linearly interpolated average sell price in copper.
+    """
+    if not sheet:
+        return 0
+    if ilvl <= sheet[0]["itemlevel"]:
+        return sheet[0]["avg_sell_price"]
+    if ilvl >= sheet[-1]["itemlevel"]:
+        return sheet[-1]["avg_sell_price"]
+        
+    for i in range(len(sheet) - 1):
+        p1 = sheet[i]
+        p2 = sheet[i+1]
+        if p1["itemlevel"] <= ilvl <= p2["itemlevel"]:
+            if p2["itemlevel"] == p1["itemlevel"]:
+                return p1["avg_sell_price"]
+            ratio = (ilvl - p1["itemlevel"]) / (p2["itemlevel"] - p1["itemlevel"])
+            return p1["avg_sell_price"] + ratio * (p2["avg_sell_price"] - p1["avg_sell_price"])
+    return sheet[0]["avg_sell_price"]
+
+def calculate_item_sell_price(lookup_database, category, quality_code, ilvl):
+    """
+    Finds a sell price baseline using a rigid multi-tiered fallback architecture:
+    1. Exact match (Quality, Slot, Subclass)
+    2. Alternative Quality match (Same Slot & Subclass)
+    3. Global Subclass match (Any Slot or Quality matching the base weapon/armor type)
+    """
+    cls, subcls, inv_type = category["class"], category["subclass"], category["InventoryType"]
+    
+    # Tier 1: Exact Match
+    exact_key = (cls, subcls, inv_type, quality_code)
+    if exact_key in lookup_database and lookup_database[exact_key]:
+        return get_dynamic_sell_price(lookup_database[exact_key], ilvl)
+        
+    # Tier 2: Check alternative qualities for the same slot/subclass configuration
+    quality_ladder = [quality_code] + [3, 4, 2, 1, 0, 5] # Priorities: Rare, Epic, Uncommon, etc.
+    for q in quality_ladder:
+        alt_key = (cls, subcls, inv_type, q)
+        if alt_key in lookup_database and lookup_database[alt_key]:
+            return get_dynamic_sell_price(lookup_database[alt_key], ilvl)
+            
+    # Tier 3: Broadest Subclass Fallback (Scan full database for matching class/subclass structure)
+    for (c, sc, it, q), sheet in lookup_database.items():
+        if c == cls and sc == subcls and sheet:
+            return get_dynamic_sell_price(sheet, ilvl)
+            
+    return 500 # 5 Silver safety baseline if completely empty
 def get_weapon_delay(category_data):
     """
     Fetches the database-calculated average speed for a weapon subclass,
@@ -680,13 +729,15 @@ while True:
         else: avg_armor = interpolate_armor(sheet, ilvl) if category['class'] == 4 else 0.0
         fuzz_factor = random.uniform(1.0 - variance, 1.0 + variance)
         final_armor = int(avg_armor * fuzz_factor) if avg_armor > 0 else 0
+        base_sell_price = calculate_item_sell_price(lookup_database, category, quality_code, ilvl)
+        final_sell_price = int(base_sell_price * fuzz_factor)
         
         internal_memory.append({
     "config": category, "quality": quality_code, "ilvl": ilvl, "name": generated_name,
     "displayid": predicted_display_id, "dmg_min": dmg_min, "dmg_max": dmg_max, "displayid": display_obj.get("id"), "display_source": display_obj, "delay": dynamic_delay,
     "dps": final_dps, "armor": final_armor, # <--- ARMOR IS HERE, 
     "stats": stats, "RandomProperty": random_prop_id, "RandomSuffix": random_suff_id, "budget": final_budget, "required_level": req_level, "Material": item_material,
-    "sheath": item_sheath
+    "sheath": item_sheath, "sell_price": final_sell_price
 })
 
     print(f"Saved {quantity} items. Total cached: {len(internal_memory)}")
@@ -707,8 +758,8 @@ with open(output_filename, "w") as f:
         description = f"iLvl {item['ilvl']} {c['name']} generated via structural blueprint routing."
         
         sql_string = f"""DELETE FROM `item_template` WHERE `entry` = {current_id};
-INSERT INTO `item_template` (`entry`, `class`, `subclass`, `name`, `displayid`, `Quality`, `InventoryType`, `itemlevel`, `RequiredLevel`, `armor`, `delay`, `dmg_min1`, `dmg_max1`, `dmg_type1`, `stat_type1`, `stat_value1`, `stat_type2`, `stat_value2`, `stat_type3`, `stat_value3`, `stat_type4`, `stat_value4`, `stat_type5`, `stat_value5`, `stat_type6`, `stat_value6`, `RandomProperty`, `RandomSuffix`, `Material`, `sheath`, `Description`) 
-VALUES ({current_id}, {c['class']}, {c['subclass']}, '{item['name']}', {item['displayid']}, {item['quality']}, {c['InventoryType']}, {item['ilvl']}, {item['required_level']}, {item.get('armor', 0)}, {item['delay']}, {item['dmg_min']}, {item['dmg_max']}, {c['dmg_type1']}, {s['stat_type1']}, {s['stat_value1']}, {s['stat_type2']}, {s['stat_value2']}, {s['stat_type3']}, {s['stat_value3']}, {s['stat_type4']}, {s['stat_value4']}, {s['stat_type5']}, {s['stat_value5']}, {s['stat_type6']}, {s['stat_value6']}, {item['RandomProperty']}, {item['RandomSuffix']}, {item['Material']}, {item['sheath']}, '{description}');\n"""
+INSERT INTO `item_template` (`entry`, `class`, `subclass`, `name`, `displayid`, `Quality`, `InventoryType`, `itemlevel`, `RequiredLevel`, `armor`, `delay`, `dmg_min1`, `dmg_max1`, `dmg_type1`, `stat_type1`, `stat_value1`, `stat_type2`, `stat_value2`, `stat_type3`, `stat_value3`, `stat_type4`, `stat_value4`, `stat_type5`, `stat_value5`, `stat_type6`, `stat_value6`, `RandomProperty`, `RandomSuffix`, `Material`, `sheath`, `SellPrice`, `Description`) 
+VALUES ({current_id}, {c['class']}, {c['subclass']}, '{item['name']}', {item['displayid']}, {item['quality']}, {c['InventoryType']}, {item['ilvl']}, {item['required_level']}, {item.get('armor', 0)}, {item['delay']}, {item['dmg_min']}, {item['dmg_max']}, {c['dmg_type1']}, {s['stat_type1']}, {s['stat_value1']}, {s['stat_type2']}, {s['stat_value2']}, {s['stat_type3']}, {s['stat_value3']}, {s['stat_type4']}, {s['stat_value4']}, {s['stat_type5']}, {s['stat_value5']}, {s['stat_type6']}, {s['stat_value6']}, {item['RandomProperty']}, {item['RandomSuffix']}, {item['Material']}, {item['sheath']}, {item.get('sell_price', 0)},  '{description}');\n"""
         f.write(sql_string)
         
         combat_info = f" ({item['dps']} DPS | Min-Max: {item['dmg_min']}-{item['dmg_max']})" if c['class'] == 2 else " (Armor Piece)"
