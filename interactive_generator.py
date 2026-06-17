@@ -118,8 +118,13 @@ CATEGORIES = {
 }
 
 QUALITIES = {
-    1: {"name": "Uncommon (Green)", "code": 2}, 2: {"name": "Rare (Blue)", "code": 3},
-    3: {"name": "Epic (Purple)", "code": 4}, 4: {"name": "Legendary (Orange)", "code": 5}
+    1: {"name": "Uncommon (Green)",          "code": 2,        "multi": False},
+    2: {"name": "Rare (Blue)",               "code": 3,        "multi": False},
+    3: {"name": "Epic (Purple)",             "code": 4,        "multi": False},
+    4: {"name": "Legendary (Orange)",        "code": 5,        "multi": False},
+    5: {"name": "Uncommon and Rare",         "code": [2, 3],   "multi": True},
+    6: {"name": "Rare and Epic",             "code": [3, 4],   "multi": True},
+    7: {"name": "Uncommon, Rare and Epic",   "code": [2, 3, 4],"multi": True},
 }
 
 BLUEPRINTS = {
@@ -594,6 +599,28 @@ def get_interpolated_properties(ilvl_sheet, target_ilvl, inv_type, qual):
 
 internal_memory = []
 
+def prompt_blueprint(label, options_map):
+    """
+    Displays a blueprint selection menu and returns (chosen_blueprint_key, candidates).
+    options_map: dict of display_number -> blueprint_key string, e.g. {1: "AGI_DPS", 2: "STR_DPS"}
+    Returns:
+      chosen_blueprint_key  – the selected key, or "__ALL__" for random-per-item
+      chosen_blueprint_candidates – list of all keys in options_map (used when __ALL__)
+    """
+    all_num = max(options_map) + 1
+    print(f"\nSelect {label} Archetype Variant:")
+    for num, key in options_map.items():
+        # Pretty-print the blueprint key
+        friendly = key.replace("_", " ").title()
+        print(f"  [{num}] {friendly}")
+    print(f"  [{all_num}] All of the above (random per item)")
+    valid = list(options_map.keys()) + [all_num]
+    bp_choice = get_input("Choice: ", lambda x: int(x) if int(x) in valid else int("err"))
+    candidates = list(options_map.values())
+    if bp_choice == all_num:
+        return "__ALL__", candidates
+    return options_map[bp_choice], candidates
+
 def get_input(prompt, validation_fn):
     while True:
         try:
@@ -649,130 +676,91 @@ while True:
 
     category = CATEGORIES[cat_idx]
 
-    # [Blueprint Routing Logic remains unchanged from original]
+    # [Blueprint Routing Logic — All of the above supported via prompt_blueprint()]
     chosen_blueprint_key = None
+    chosen_blueprint_candidates = []
     subc = category["subclass"]
     cls = category["class"]
 
     if cls == 2:  # WEAPONS
         if subc == 19:  # Wand
-            print("\nSelect Wand Archetype Variant:")
-            print("  [1] Spell Power DPS\n  [2] Healer")
-            bp_choice = get_input("Choice: ", lambda x: int(x) if x in ['1','2'] else int("err"))
-            chosen_blueprint_key = "SP_DPS" if bp_choice == 1 else "HEALER"
+            chosen_blueprint_key, chosen_blueprint_candidates = prompt_blueprint(
+                "Wand", {1: "SP_DPS", 2: "HEALER"})
         elif subc == 7:  # 1H Sword
-            print("\nSelect 1H Sword Archetype Variant:")
-            print("  [1] Agility DPS\n  [2] Strength Tank\n  [3] Strength DPS\n  [4] Spell Power DPS\n  [5] Healer")
-            bp_choice = get_input("Choice: ", lambda x: int(x) if x in ['1','2','3','4','5'] else int("err"))
-            chosen_blueprint_key = {1: "AGI_DPS", 2: "STR_TANK", 3: "STR_DPS", 4: "SP_DPS", 5: "HEALER"}[bp_choice]
+            chosen_blueprint_key, chosen_blueprint_candidates = prompt_blueprint(
+                "1H Sword", {1: "AGI_DPS", 2: "STR_TANK", 3: "STR_DPS", 4: "SP_DPS", 5: "HEALER"})
         elif subc == 8:  # 2H Sword
-            print("\nSelect 2H Sword Archetype Variant:")
-            print("  [1] Agility DPS\n  [2] Strength DPS\n  [3] Strength Tank\n  [4] Agi/Int DPS")
-            bp_choice = get_input("Choice: ", lambda x: int(x) if x in ['1','2','3','4'] else int("err"))
-            chosen_blueprint_key = {1: "AGI_DPS", 2: "STR_DPS", 3: "STR_TANK", 4: "AGI_INT_DPS"}[bp_choice]
+            chosen_blueprint_key, chosen_blueprint_candidates = prompt_blueprint(
+                "2H Sword", {1: "AGI_DPS", 2: "STR_DPS", 3: "STR_TANK", 4: "AGI_INT_DPS"})
         elif subc == 15:  # Dagger
-            print("\nSelect Dagger Archetype Variant:")
-            print("  [1] Agility DPS\n  [2] Spell Power DPS\n  [3] Healer\n  [4] Agi/Int DPS")
-            bp_choice = get_input("Choice: ", lambda x: int(x) if x in ['1','2','3','4'] else int("err"))
-            chosen_blueprint_key = {1: "AGI_DPS", 2: "SP_DPS", 3: "HEALER", 4: "AGI_INT_DPS"}[bp_choice]
+            chosen_blueprint_key, chosen_blueprint_candidates = prompt_blueprint(
+                "Dagger", {1: "AGI_DPS", 2: "SP_DPS", 3: "HEALER", 4: "AGI_INT_DPS"})
         elif subc == 10:  # Staff
-            print("\nSelect Staff Archetype Variant:")
-            print("  [1] Agility DPS\n  [2] Spell Power DPS\n  [3] Healer\n  [4] Agility Tank\n  [5] Strength DPS\n  [6] Agi/Int DPS")
-            bp_choice = get_input("Choice: ", lambda x: int(x) if x in ['1','2','3','4','5','6'] else int("err"))
-            chosen_blueprint_key = {1: "AGI_DPS", 2: "SP_DPS", 3: "HEALER", 4: "AGI_TANK", 5: "STR_DPS", 6: "AGI_INT_DPS"}[bp_choice]
+            chosen_blueprint_key, chosen_blueprint_candidates = prompt_blueprint(
+                "Staff", {1: "AGI_DPS", 2: "SP_DPS", 3: "HEALER", 4: "AGI_TANK", 5: "STR_DPS", 6: "AGI_INT_DPS"})
         elif subc == 13:  # Fist Weapon
-            print("\nSelect Fist Weapon Archetype Variant:")
-            print("  [1] Agility DPS\n  [2] Spell Power DPS\n  [3] Agi/Int DPS")
-            bp_choice = get_input("Choice: ", lambda x: int(x) if x in ['1','2','3'] else int("err"))
-            chosen_blueprint_key = {1: "AGI_DPS", 2: "SP_DPS", 3: "AGI_INT_DPS"}[bp_choice]
+            chosen_blueprint_key, chosen_blueprint_candidates = prompt_blueprint(
+                "Fist Weapon", {1: "AGI_DPS", 2: "SP_DPS", 3: "AGI_INT_DPS"})
         elif subc == 0:  # 1H Axe (Class 2)
-            print("\nSelect 1H Axe Archetype Variant:")
-            print("  [1] Agility DPS\n  [2] Strength DPS\n  [3] Strength Tank\n  [4] Agi/Int DPS")
-            bp_choice = get_input("Choice: ", lambda x: int(x) if x in ['1','2','3','4'] else int("err"))
-            chosen_blueprint_key = {1: "AGI_DPS", 2: "STR_DPS", 3: "STR_TANK", 4: "AGI_INT_DPS"}[bp_choice]
+            chosen_blueprint_key, chosen_blueprint_candidates = prompt_blueprint(
+                "1H Axe", {1: "AGI_DPS", 2: "STR_DPS", 3: "STR_TANK", 4: "AGI_INT_DPS"})
         elif subc == 1:  # 2H Axe
-            print("\nSelect 2H Axe Archetype Variant:")
-            print("  [1] Agility DPS\n  [2] Strength DPS\n  [3] Strength Tank\n  [4] Agi/Int DPS")
-            bp_choice = get_input("Choice: ", lambda x: int(x) if x in ['1','2','3','4'] else int("err"))
-            chosen_blueprint_key = {1: "AGI_DPS", 2: "STR_DPS", 3: "STR_TANK", 4: "AGI_INT_DPS"}[bp_choice]
+            chosen_blueprint_key, chosen_blueprint_candidates = prompt_blueprint(
+                "2H Axe", {1: "AGI_DPS", 2: "STR_DPS", 3: "STR_TANK", 4: "AGI_INT_DPS"})
         elif subc in [5, 6]:  # 2H Mace or Polearm
-            print(f"\nSelect {category['name']} Archetype Variant:")
-            print("  [1] Strength DPS\n  [2] Agility DPS\n  [3] Strength Tank\n  [4] Agility Tank\n  [5] Agi/Int DPS")
-            bp_choice = get_input("Choice: ", lambda x: int(x) if x in ['1','2','3','4','5'] else int("err"))
-            chosen_blueprint_key = {1: "STR_DPS", 2: "AGI_DPS", 3: "STR_TANK", 4: "AGI_TANK", 5: "AGI_INT_DPS"}[bp_choice]
+            chosen_blueprint_key, chosen_blueprint_candidates = prompt_blueprint(
+                category['name'], {1: "STR_DPS", 2: "AGI_DPS", 3: "STR_TANK", 4: "AGI_TANK", 5: "AGI_INT_DPS"})
         elif subc in [2, 3, 18]:  # Bows, Guns, Crossbows
-            print(f"\nSelect {category['name']} Archetype Variant:")
-            print("  [1] Strength Tank\n  [2] Strength DPS\n  [3] Agility DPS\n  [4] Agi/Int DPS")
-            bp_choice = get_input("Choice: ", lambda x: int(x) if x in ['1','2','3','4'] else int("err"))
-            chosen_blueprint_key = {1: "STR_TANK", 2: "STR_DPS", 3: "AGI_DPS", 4: "AGI_INT_DPS"}[bp_choice]
+            chosen_blueprint_key, chosen_blueprint_candidates = prompt_blueprint(
+                category['name'], {1: "STR_TANK", 2: "STR_DPS", 3: "AGI_DPS", 4: "AGI_INT_DPS"})
         elif subc == 16:  # Thrown
-            print("\nSelect Thrown Weapon Archetype Variant:")
-            print("  [1] Agility DPS\n  [2] Strength DPS\n  [3] Strength Tank")
-            bp_choice = get_input("Choice: ", lambda x: int(x) if x in ['1','2','3'] else int("err"))
-            chosen_blueprint_key = {1: "AGI_DPS", 2: "STR_DPS", 3: "STR_TANK"}[bp_choice]
-        elif subc == 4: # 1H Mace
-            print("\nSelect 1H Mace Archetype Variant:")
-            print("  [1] Strength DPS\n  [2] Strength Tank\n  [3] Healer\n  [4] Spell Power DPS")
-            bp_choice = get_input("Choice: ", lambda x: int(x) if x in ['1','2','3','4'] else int("err"))
-            chosen_blueprint_key = {1: "STR_DPS", 2: "STR_TANK", 3: "HEALER", 4: "SP_DPS"}[bp_choice]
+            chosen_blueprint_key, chosen_blueprint_candidates = prompt_blueprint(
+                "Thrown Weapon", {1: "AGI_DPS", 2: "STR_DPS", 3: "STR_TANK"})
+        elif subc == 4:  # 1H Mace
+            chosen_blueprint_key, chosen_blueprint_candidates = prompt_blueprint(
+                "1H Mace", {1: "STR_DPS", 2: "STR_TANK", 3: "HEALER", 4: "SP_DPS"})
 
     elif cls == 4:  # ARMOR
-        if subc == 1: # Cloth
-            print("\nSelect Cloth Archetype:")
-            print("  [1] Spell Power DPS\n  [2] Healer")
-            bp_choice = get_input("Choice: ", lambda x: int(x) if x in ['1','2'] else int("err"))
-            chosen_blueprint_key = {1: "SP_DPS", 2: "HEALER"}[bp_choice]
-        elif subc == 2: # Leather
-            print("\nSelect Leather Archetype:")
-            print("  [1] Agility DPS\n  [2] Agility Tank\n  [3] Healer\n  [4] Spell Power DPS\n  [5] Agi/Int DPS")
-            bp_choice = get_input("Choice: ", lambda x: int(x) if x in ['1','2','3','4','5'] else int("err"))
-            chosen_blueprint_key = {1: "AGI_DPS", 2: "AGI_TANK", 3: "HEALER", 4: "SP_DPS", 5: "AGI_INT_DPS"}[bp_choice]
-        elif subc == 3: # Mail
-            print("\nSelect Mail Archetype:")
-            print("  [1] Agility DPS\n  [2] Strength DPS\n  [3] Healer\n  [4] Spell Power DPS\n  [5] Agi/Int DPS")
-            bp_choice = get_input("Choice: ", lambda x: int(x) if x in ['1','2','3','4','5'] else int("err"))
-            chosen_blueprint_key = {1: "AGI_DPS", 2: "STR_DPS", 3: "HEALER", 4: "SP_DPS", 5: "AGI_INT_DPS"}[bp_choice]
-        elif subc == 4: # Plate
-            print("\nSelect Plate Archetype:")
-            print("  [1] Strength DPS\n  [2] Strength Tank\n  [3] HEALER")
-            bp_choice = get_input("Choice: ", lambda x: int(x) if x in ['1','2','3'] else int("err"))
-            chosen_blueprint_key = {1: "STR_DPS", 2: "STR_TANK", 3: "HEALER"}[bp_choice]
-        elif subc == 0 or subc == 6: # Miscellaneous (0) OR Shields (6)
-            print(f"\nSelect {category['name']} Archetype:")
-            
+        if subc == 1:  # Cloth
+            chosen_blueprint_key, chosen_blueprint_candidates = prompt_blueprint(
+                "Cloth", {1: "SP_DPS", 2: "HEALER"})
+        elif subc == 2:  # Leather
+            chosen_blueprint_key, chosen_blueprint_candidates = prompt_blueprint(
+                "Leather", {1: "AGI_DPS", 2: "AGI_TANK", 3: "HEALER", 4: "SP_DPS", 5: "AGI_INT_DPS"})
+        elif subc == 3:  # Mail
+            chosen_blueprint_key, chosen_blueprint_candidates = prompt_blueprint(
+                "Mail", {1: "AGI_DPS", 2: "STR_DPS", 3: "HEALER", 4: "SP_DPS", 5: "AGI_INT_DPS"})
+        elif subc == 4:  # Plate
+            chosen_blueprint_key, chosen_blueprint_candidates = prompt_blueprint(
+                "Plate", {1: "STR_DPS", 2: "STR_TANK", 3: "HEALER"})
+        elif subc == 0 or subc == 6:  # Miscellaneous (0) OR Shields (6)
             # 1. Shield (Subclass 6)
             if subc == 6:
-                print("  [1] Strength Tank\n  [2] Spell Power DPS\n  [3] Healer")
-                bp_choice = get_input("Choice: ", lambda x: int(x) if x in ['1','2','3'] else int("err"))
-                chosen_blueprint_key = {
-                    1: "STR_TANK", 2: "SP_DPS", 3: "HEALER"
-                }[bp_choice]
-            
+                chosen_blueprint_key, chosen_blueprint_candidates = prompt_blueprint(
+                    category['name'], {1: "STR_TANK", 2: "SP_DPS", 3: "HEALER"})
             # 2. Offhand (InventoryType 23)
             elif category['InventoryType'] == 23:
-                print("  [1] Spell Power DPS\n  [2] Healer")
-                bp_choice = get_input("Choice: ", lambda x: int(x) if x in ['1','2'] else int("err"))
-                chosen_blueprint_key = {
-                    1: "SP_DPS", 2: "HEALER"
-                }[bp_choice]
-            
+                chosen_blueprint_key, chosen_blueprint_candidates = prompt_blueprint(
+                    category['name'], {1: "SP_DPS", 2: "HEALER"})
             # 3. Standard Miscellaneous (Cloak, Neck, Ring)
             else:
-                print("  [1] Agility DPS\n  [2] Strength DPS\n  [3] Spell Power DPS\n  [4] Healer")
-                print("  [5] Agi/Int DPS\n  [6] Strength Tank\n  [7] Agility Tank")
-                bp_choice = get_input("Choice: ", lambda x: int(x) if x in ['1','2','3','4','5','6','7'] else int("err"))
-                chosen_blueprint_key = {
-                    1: "AGI_DPS", 2: "STR_DPS", 3: "SP_DPS", 4: "HEALER",
-                    5: "AGI_INT_DPS", 6: "STR_TANK", 7: "AGI_TANK"
-                }[bp_choice]
+                chosen_blueprint_key, chosen_blueprint_candidates = prompt_blueprint(
+                    category['name'],
+                    {1: "AGI_DPS", 2: "STR_DPS", 3: "SP_DPS", 4: "HEALER",
+                     5: "AGI_INT_DPS", 6: "STR_TANK", 7: "AGI_TANK"})
         else:
             print(f"⚠️ Configuration mapping missing for Subclass {subc} (Class {cls}). Defaulting to STR_DPS.")
             chosen_blueprint_key = "STR_DPS"
+            chosen_blueprint_candidates = ["STR_DPS"]
 
     # ... [Rest of the generation logic remains the same]
     print("\nAvailable Qualities:")
     for k, v in QUALITIES.items(): print(f"  [{k}] {v['name']}")
-    quality_code = QUALITIES[get_input("Select Item Quality (Number): ", lambda x: int(x) if int(x) in QUALITIES else int("err"))]["code"]
+    selected_quality_entry = QUALITIES[get_input("Select Item Quality (Number): ", lambda x: int(x) if int(x) in QUALITIES else int("err"))]
+    # For multi-quality entries the engine will draw a random code per item; for single entries
+    # quality_code_pool holds a one-element list so the rest of the logic stays uniform.
+    quality_code_pool = selected_quality_entry["code"] if selected_quality_entry["multi"] else [selected_quality_entry["code"]]
+    # quality_code is resolved fresh for every item inside the generation loop below.
 
     print("\nEnter Target Item Level (e.g., '85' or '50-85'):")
     ilvl_range = get_input("Choice: ", parse_ilvl_input)
@@ -792,15 +780,11 @@ while True:
 
     available_levels = list(range(ilvl_range[0], ilvl_range[1] + 1))
     random.shuffle(available_levels)
-    
-    lookup_key = (category["class"], category["subclass"], category["InventoryType"], quality_code)
-    if lookup_key not in lookup_database:
-     print(f"⚠️ Configuration mapping missing for {category['name']}. Skipping.")
-    # Exit or handle error here
-    else:
-     sheet = lookup_database[lookup_key]
-     
-     for _ in range(quantity):
+
+    for _ in range(quantity):
+        # --- Draw quality for THIS item (supports multi-quality pools) ---
+        quality_code = random.choice(quality_code_pool)
+
         # 4. Handle the "Deck" (Refill if empty)
         if not available_levels:
             available_levels = list(range(ilvl_range[0], ilvl_range[1] + 1))
@@ -808,7 +792,19 @@ while True:
         
         # 5. DRAW THE NEW ILEVEL for THIS specific item
         ilvl = available_levels.pop()
-        
+
+        # --- Resolve blueprint for this item (supports "All of the above") ---
+        if chosen_blueprint_key == "__ALL__":
+            item_blueprint_key = random.choice(chosen_blueprint_candidates)
+        else:
+            item_blueprint_key = chosen_blueprint_key
+
+        lookup_key = (category["class"], category["subclass"], category["InventoryType"], quality_code)
+        if lookup_key not in lookup_database:
+            print(f"⚠️ Configuration mapping missing for {category['name']} (Q{quality_code}). Skipping item.")
+            continue
+        sheet = lookup_database[lookup_key]
+
         # 6. GET INTERPOLATION for THIS specific iLevel
         interpolated = get_interpolated_properties(sheet, ilvl, category["InventoryType"], quality_code)
         
@@ -865,8 +861,8 @@ while True:
         has_random_enchant = (random_prop_id != 0 or random_suff_id != 0)
 
         if not has_random_enchant and num_stats_to_roll > 0:
-            if chosen_blueprint_key and chosen_blueprint_key in BLUEPRINTS:
-                blueprint = BLUEPRINTS[chosen_blueprint_key]
+            if item_blueprint_key and item_blueprint_key in BLUEPRINTS:
+                blueprint = BLUEPRINTS[item_blueprint_key]
                 pool, anchors, current_weights = list(blueprint["pool"]), list(blueprint["anchors"]), blueprint["weights"].copy()
             else:
                 profile_key = (category["class"], category["subclass"], category["InventoryType"])
@@ -886,7 +882,7 @@ while True:
             if category["InventoryType"] in [17, 25, 26] or category["subclass"] in [1, 5, 6, 8, 10]:
                 pool = [s for s in pool if s not in [15, 48]]
                 anchors = [s for s in anchors if s not in [15, 48]]
-            if chosen_blueprint_key == "AGI_TANK":
+            if item_blueprint_key == "AGI_TANK":
                 pool = [s for s in pool if s != 14]
                 anchors = [s for s in anchors if s != 14]
 
