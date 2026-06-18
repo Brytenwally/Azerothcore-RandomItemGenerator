@@ -98,7 +98,17 @@ global_budget_curves = {}
 for (inv_type, qual), group in df.groupby(['InventoryType', 'Quality']):
     curve_nodes = []
     for ilvl, sub_group in group.groupby('itemlevel'):
-        valid_budget_rows = sub_group[sub_group['total_budget'] > 0]['total_budget']
+        # Exclude RandomProperty/RandomSuffix items explicitly, not just via
+        # total_budget > 0. Some of these still carry a nonzero *base* stat
+        # total (the random component is generated at loot time and never
+        # touches item_template), so relying on total_budget alone lets a
+        # partially-itemized random item sneak in and drag that single
+        # itemlevel's average down -- exactly the kind of localized dip that
+        # makes a higher-ilvl node look weaker than its lower-ilvl neighbor.
+        clean_rows = sub_group[
+            (sub_group['RandomProperty'] == 0) & (sub_group['RandomSuffix'] == 0)
+        ]
+        valid_budget_rows = clean_rows[clean_rows['total_budget'] > 0]['total_budget']
         if not valid_budget_rows.empty:
             curve_nodes.append({
                 "itemlevel": int(ilvl),
@@ -131,8 +141,8 @@ for (cls, subcls, inv_type, qual), group in df.groupby(['class', 'subclass', 'In
         for idx, row in sub_group.iterrows():
             rp, rs, n_stats = int(row['RandomProperty']), int(row['RandomSuffix']), int(row['num_stats'])
             if rp != 0 or rs != 0:
-                profiles.append({"num_stats": 0, "RandomProperty": rp, "RandomSuffix": rs})
-            elif row['total_budget'] > 0 and n_stats > 0:
+                continue  # dynamic random stats aren't in item_template -- not a usable reference
+            if row['total_budget'] > 0 and n_stats > 0:
                 profiles.append({"num_stats": n_stats, "RandomProperty": 0, "RandomSuffix": 0})
 
         if not valid_dps_rows.empty or avg_armor > 0 or profiles:
@@ -212,8 +222,8 @@ def build_slot_fallback(where_clause, label, is_weapon=False):
             for idx, row in sub_group.iterrows():
                 rp, rs, n_stats = int(row['RandomProperty']), int(row['RandomSuffix']), int(row['num_stats'])
                 if rp != 0 or rs != 0:
-                    profiles.append({"num_stats": 0, "RandomProperty": rp, "RandomSuffix": rs})
-                elif row['total_budget'] > 0 and n_stats > 0:
+                    continue  # dynamic random stats aren't in item_template -- not a usable reference
+                if row['total_budget'] > 0 and n_stats > 0:
                     profiles.append({"num_stats": n_stats, "RandomProperty": 0, "RandomSuffix": 0})
 
             if profiles or avg_armor > 0 or avg_dps > 0:
