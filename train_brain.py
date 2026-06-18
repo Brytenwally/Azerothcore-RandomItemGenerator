@@ -265,28 +265,29 @@ ADJECTIVE_WHITELIST = [
 ]
 GENITIVE_WHITELIST = [
     # --- Warcraft Alliance Icons ---
-    "Arthas's", "Uther's", "Varian's", "Anduin's", "Jaina's", "Genn's", 
-    "Magni's", "Muradin's", "Malfurion's", "Tyrande's", "Turalyon's", 
-    "Alleria's", "Khadgar's", "Medivh's",
+    "Arthas''s", "Uther''s", "Varian''s", "Anduin''s", "Jaina''s", "Genn''s", 
+    "Magni''s", "Muradin''s", "Malfurion''s", "Tyrande''s", "Turalyon''s", 
+    "Alleria''s", "Khadgar''s", "Medivh''s",
 
     # --- Warcraft Horde Icons ---
-    "Thrall's", "Garrosh's", "Sylvanas's", "Vol'jin's", "Cairne's", 
-    "Baine's", "Grommash's", "Rexxar's", "Saurfang's", "Rokhan's", 
-    "Gazlowe's", "Gul'dan's",
+    "Thrall''s", "Garrosh''s", "Sylvanas''s", "Vol''jin''s", "Cairne''s", 
+    "Baine''s", "Grommash''s", "Rexxar''s", "Saurfang''s", "Rokhan''s", 
+    "Gazlowe''s", "Gul''dan''s",
 
     # --- Warcraft Villains & Cosmic ---
-    "Illidan's", "Ner'zhul's", "Kel'Thuzad's", "Anub'arak's", "Ragnaros's", 
-    "Deathwing's", "Onyxia's", "Kael'thas's", "Kil'jaeden's", "Archimonde's", 
-    "Lich's", "Dreadlord's", "Valkyr's",
+    "Illidan''s", "Ner''zhul''s", "Kel''Thuzad''s", "Anub''arak''s", "Ragnaros''s", 
+    "Deathwing''s", "Onyxia''s", "Kael''thas''s", "Kil''jaeden''s", "Archimonde''s", 
+    "Lich''s", "Dreadlord''s", "Valkyr''s",
 
     # --- Fantasy Archetypes & Titles ---
-    "King's", "Queen's", "Warchief's", "Warlord's", "Archmage's", 
-    "Highlord's", "Crusader's", "Sentinel's", "Dragon's", "Wyrm's", 
-    "Titan's", "Demon's", "Giant's", "Warden's", "Guardian's", 
-    "Assassin's", "Captain's", "Paladin's", "Shaman's", "Druid's", 
-    "Sorcerer's", "Hero's", "Outlaw's", "Hunter's", "Seeker's", 
-    "Vindicator's", "Exarch's", "Elder's", "Ancient's", "Raven's"
+    "King''s", "Queen''s", "Warchief''s", "Warlord''s", "Archmage''s", 
+    "Highlord''s", "Crusader''s", "Sentinel''s", "Dragon''s", "Wyrm''s", 
+    "Titan''s", "Demon''s", "Giant''s", "Warden''s", "Guardian''s", 
+    "Assassin''s", "Captain''s", "Paladin''s", "Shaman''s", "Druid''s", 
+    "Sorcerer''s", "Hero''s", "Outlaw''s", "Hunter''s", "Seeker''s", 
+    "Vindicator''s", "Exarch''s", "Elder''s", "Ancient''s", "Raven''s"
 ]
+
 
 MATERIAL_WHITELIST = [
     # --- Classic/Basic Metals ---
