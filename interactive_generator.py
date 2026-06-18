@@ -147,13 +147,32 @@ def export_to_excel_tooltips(internal_memory, filename="generated_items_tooltips
         print("⚠️ Core collection cache array is empty. No Excel file created.")
         return
 
+    # Excel hard-caps a worksheet at 1,048,576 rows. Mass Creation can easily
+    # produce enough items to blow past that (each item block uses up to ~18
+    # rows), which used to crash openpyxl mid-write and abort the export
+    # before wb.save() ever ran -- so the SQL/CSV files would appear but the
+    # tooltips workbook never got saved. Instead of capping the data, we spill
+    # over into additional worksheets within the SAME workbook/file once a
+    # sheet gets close to the limit, so every item is still represented no
+    # matter how large the run is.
+    EXCEL_MAX_ROW = 1_048_576
+    MAX_ROWS_PER_ITEM = 20          # worst-case rows a single item block can consume
+    SHEET_ROW_CUTOFF = EXCEL_MAX_ROW - MAX_ROWS_PER_ITEM - 5  # safety margin
+
+    def setup_sheet(target_ws):
+        target_ws.views.sheetView[0].showGridLines = True
+        target_ws.column_dimensions['A'].width = 3
+        target_ws.column_dimensions['B'].width = 16
+        target_ws.column_dimensions['C'].width = 14
+        target_ws.column_dimensions['D'].width = 14
+        target_ws.column_dimensions['E'].width = 16
+
     wb = Workbook()
     ws = wb.active
-    ws.title = "Item Tooltips"
-    
-    # Keep grid lines visible to maintain spreadsheet utility
-    ws.views.sheetView[0].showGridLines = True
-    
+    sheet_num = 1
+    ws.title = f"Item Tooltips {sheet_num}"
+    setup_sheet(ws)
+
     # Hex mapping for Blizzard item quality font strings
     QUALITY_COLORS = {
         0: "9D9D9D",  # Poor / Grey
@@ -183,31 +202,49 @@ def export_to_excel_tooltips(internal_memory, filename="generated_items_tooltips
     thin_grey = Side(border_style="thin", color="3A3F4D")
     
     current_row = 2  # Start row coordinate position
-    
-    for item in internal_memory:
+    total_items = len(internal_memory)
+
+    for item_idx, item in enumerate(internal_memory):
+        # Spill into a fresh worksheet if this item's block could push us
+        # past Excel's row ceiling on the current sheet.
+        if current_row > SHEET_ROW_CUTOFF:
+            sheet_num += 1
+            ws = wb.create_sheet(title=f"Item Tooltips {sheet_num}")
+            setup_sheet(ws)
+            current_row = 2
+
+        if total_items > 2000 and (item_idx % 2000 == 0 or item_idx == total_items - 1):
+            print(f"\r  📦 Writing tooltip {item_idx + 1:,}/{total_items:,} "
+                  f"(sheet {sheet_num})...", end="", flush=True)
+
         c = item["config"]
         q_code = item.get("quality", 2)
         q_color = QUALITY_COLORS.get(q_code, "FFFFFF")
         
         start_row = current_row  # Track where this specific item box begins
         
-        # Helper inner function to write background-painted rows smoothly
+        # Helper inner function to write background-painted rows smoothly.
+        # NOTE: we intentionally do NOT call ws.merge_cells() here. openpyxl's
+        # merge-range bookkeeping gets quadratically slower as the number of
+        # merged ranges grows, which is what made large Mass Creation exports
+        # take an effectively unbounded amount of time (and look "broken").
+        # Left-aligned text overflows visually into empty neighboring cells
+        # in Excel anyway, so the look is preserved without the cost.
         def write_row(val_left, val_right=None, font_left=None, font_right=None, merge_all=False):
             nonlocal current_row
             for col in range(2, 6):
                 ws.cell(row=current_row, column=col).fill = bg_fill
                 
             if merge_all:
-                ws.merge_cells(start_row=current_row, start_column=2, end_row=current_row, end_column=5)
                 cell = ws.cell(row=current_row, column=2, value=val_left)
                 if font_left: cell.font = font_left
             else:
-                ws.merge_cells(start_row=current_row, start_column=2, end_row=current_row, end_column=3)
                 cell_l = ws.cell(row=current_row, column=2, value=val_left)
                 if font_left: cell_l.font = font_left
                 
-                ws.merge_cells(start_row=current_row, start_column=4, end_row=current_row, end_column=5)
-                cell_r = ws.cell(row=current_row, column=4, value=val_right)
+                # Placed in the rightmost column so right-aligned overflow
+                # still lands flush against the same edge the old D:E merge did.
+                cell_r = ws.cell(row=current_row, column=5, value=val_right)
                 if font_right: cell_r.font = font_right
                 cell_r.alignment = Alignment(horizontal="right")
             current_row += 1
@@ -312,15 +349,12 @@ def export_to_excel_tooltips(internal_memory, filename="generated_items_tooltips
                 
         current_row += 3  # Insert spacing margin rows between rendered card boxes
 
-    # Fix aspect column scaling parameters
-    ws.column_dimensions['A'].width = 3
-    ws.column_dimensions['B'].width = 16
-    ws.column_dimensions['C'].width = 14
-    ws.column_dimensions['D'].width = 14
-    ws.column_dimensions['E'].width = 16
-    
+    if total_items > 2000:
+        print()  # close out the progress line
+
     wb.save(filename)
-    print(f"📦 Excel Tooltip Sheet successfully written to system workspace: {filename}")
+    sheet_note = f" across {sheet_num} sheets" if sheet_num > 1 else ""
+    print(f"📦 Excel Tooltip Sheet successfully written to system workspace: {filename}{sheet_note}")
 def get_dynamic_sell_price(sheet, ilvl):
     """
     Finds the closest item level nodes in the sheet and returns the 
