@@ -130,8 +130,8 @@ QUALITIES = {
 BLUEPRINTS = {
     "AGI_DPS":   {"pool": [3, 7, 31, 32, 36, 38, 44], "anchors": [3], "weights": {3: 130, 7: 100, 31: 90, 32: 90, 36: 60, 38: 80, 44: 70}},
     "STR_DPS":   {"pool": [4, 7, 31, 32, 36, 38, 44], "anchors": [4], "weights": {4: 130, 7: 100, 31: 90, 32: 90, 36: 60, 38: 80, 44: 70}},
-    "SP_DPS":    {"pool": [5, 7, 45, 31, 32, 36, 6],     "anchors": [5], "weights": {5: 120, 45: 130, 7: 90, 31: 85, 32: 85, 36: 80, 6:50}},
-    "HEALER":    {"pool": [5, 6, 7, 45, 32, 36, 43],   "anchors": [5], "weights": {5: 110, 6: 110, 45: 120, 7: 90, 32: 80, 36: 80, 43: 75}},
+    "SP_DPS":    {"pool": [5, 7, 45, 31, 32, 36],     "anchors": [5, 45], "weights": {5: 120, 45: 130, 7: 90, 31: 85, 32: 85, 36: 80}},
+    "HEALER":    {"pool": [5, 6, 7, 45, 32, 36, 43],   "anchors": [5, 45], "weights": {5: 110, 6: 110, 45: 120, 7: 90, 32: 80, 36: 80, 43: 75}},
     "STR_TANK":  {"pool": [4, 7, 12, 13, 14, 31, 37],  "anchors": [7, 4],  "weights": {7: 130, 4: 100, 12: 85, 13: 90, 14: 90, 31: 75, 37: 85}},
     "AGI_TANK":  {"pool": [3, 7, 12, 13, 31, 37, 32, 36, 38], "anchors": [3, 7], "weights": {3: 150, 7: 140, 12: 85, 13: 100, 31: 80, 37: 85, 32: 45, 36: 45, 38: 40}},
     "AGI_INT_DPS": {"pool": [3, 5, 7, 31, 32, 36, 38, 44], "anchors": [3, 5], "weights": {3: 130, 5: 100, 7:100, 31: 90, 32: 90, 36: 60, 38: 80, 44: 70}}
@@ -733,6 +733,375 @@ def resolve_blueprint_for_category(category):
     return "STR_DPS", ["STR_DPS"]
 
 
+# ── MASS CREATION: blueprint auto-resolver (no user prompts) ─────────────────
+# Maps each category's (class, subclass, InventoryType) signature to the full
+# list of valid blueprints so mass-creation can pick one at random per item.
+
+MASS_BLUEPRINT_MAP = {
+    # Weapons ─────────────────────────────────────────────────────────────────
+    (2, 19, 26): ["SP_DPS", "HEALER"],                            # Wand
+    (2,  7, 13): ["AGI_DPS", "STR_TANK", "STR_DPS", "SP_DPS", "HEALER"],  # 1H Sword
+    (2,  8, 17): ["AGI_DPS", "STR_DPS", "STR_TANK", "AGI_INT_DPS"],       # 2H Sword
+    (2, 15, 13): ["AGI_DPS", "SP_DPS", "HEALER", "AGI_INT_DPS"],          # Dagger
+    (2, 10, 17): ["AGI_DPS", "SP_DPS", "HEALER", "AGI_TANK", "STR_DPS", "AGI_INT_DPS"],  # Staff
+    (2, 13, 13): ["AGI_DPS", "SP_DPS", "AGI_INT_DPS"],           # Fist Weapon
+    (2,  0, 13): ["AGI_DPS", "STR_DPS", "STR_TANK", "AGI_INT_DPS"],  # 1H Axe
+    (2,  1, 17): ["AGI_DPS", "STR_DPS", "STR_TANK", "AGI_INT_DPS"],  # 2H Axe
+    (2,  5, 17): ["STR_DPS", "AGI_DPS", "STR_TANK", "AGI_TANK", "AGI_INT_DPS"],  # 2H Mace
+    (2,  6, 17): ["STR_DPS", "AGI_DPS", "STR_TANK", "AGI_TANK", "AGI_INT_DPS"],  # Polearm
+    (2,  2, 15): ["STR_TANK", "STR_DPS", "AGI_DPS", "AGI_INT_DPS"],  # Bow
+    (2, 18, 26): ["STR_TANK", "STR_DPS", "AGI_DPS", "AGI_INT_DPS"],  # Crossbow
+    (2,  3, 26): ["STR_TANK", "STR_DPS", "AGI_DPS", "AGI_INT_DPS"],  # Gun
+    (2, 16, 25): ["AGI_DPS", "STR_DPS", "STR_TANK"],              # Thrown
+    (2,  4, 13): ["STR_DPS", "STR_TANK", "HEALER", "SP_DPS"],    # 1H Mace
+    # Armor – Cloth ───────────────────────────────────────────────────────────
+    (4,  1,  1): ["SP_DPS", "HEALER"],   # Cloth Helm
+    (4,  1,  3): ["SP_DPS", "HEALER"],   # Cloth Shoulders
+    (4,  1,  5): ["SP_DPS", "HEALER"],   # Cloth Chest
+    (4,  1,  9): ["SP_DPS", "HEALER"],   # Cloth Wrist
+    (4,  1, 10): ["SP_DPS", "HEALER"],   # Cloth Gloves
+    (4,  1,  6): ["SP_DPS", "HEALER"],   # Cloth Waist
+    (4,  1,  7): ["SP_DPS", "HEALER"],   # Cloth Legs
+    (4,  1,  8): ["SP_DPS", "HEALER"],   # Cloth Feet
+    # Armor – Leather ─────────────────────────────────────────────────────────
+    (4,  2,  1): ["AGI_DPS", "AGI_TANK", "HEALER", "SP_DPS", "AGI_INT_DPS"],
+    (4,  2,  3): ["AGI_DPS", "AGI_TANK", "HEALER", "SP_DPS", "AGI_INT_DPS"],
+    (4,  2,  5): ["AGI_DPS", "AGI_TANK", "HEALER", "SP_DPS", "AGI_INT_DPS"],
+    (4,  2,  9): ["AGI_DPS", "AGI_TANK", "HEALER", "SP_DPS", "AGI_INT_DPS"],
+    (4,  2, 10): ["AGI_DPS", "AGI_TANK", "HEALER", "SP_DPS", "AGI_INT_DPS"],
+    (4,  2,  6): ["AGI_DPS", "AGI_TANK", "HEALER", "SP_DPS", "AGI_INT_DPS"],
+    (4,  2,  7): ["AGI_DPS", "AGI_TANK", "HEALER", "SP_DPS", "AGI_INT_DPS"],
+    (4,  2,  8): ["AGI_DPS", "AGI_TANK", "HEALER", "SP_DPS", "AGI_INT_DPS"],
+    # Armor – Mail ────────────────────────────────────────────────────────────
+    (4,  3,  1): ["AGI_DPS", "STR_DPS", "HEALER", "SP_DPS", "AGI_INT_DPS"],
+    (4,  3,  3): ["AGI_DPS", "STR_DPS", "HEALER", "SP_DPS", "AGI_INT_DPS"],
+    (4,  3,  5): ["AGI_DPS", "STR_DPS", "HEALER", "SP_DPS", "AGI_INT_DPS"],
+    (4,  3,  9): ["AGI_DPS", "STR_DPS", "HEALER", "SP_DPS", "AGI_INT_DPS"],
+    (4,  3, 10): ["AGI_DPS", "STR_DPS", "HEALER", "SP_DPS", "AGI_INT_DPS"],
+    (4,  3,  6): ["AGI_DPS", "STR_DPS", "HEALER", "SP_DPS", "AGI_INT_DPS"],
+    (4,  3,  7): ["AGI_DPS", "STR_DPS", "HEALER", "SP_DPS", "AGI_INT_DPS"],
+    (4,  3,  8): ["AGI_DPS", "STR_DPS", "HEALER", "SP_DPS", "AGI_INT_DPS"],
+    # Armor – Plate ───────────────────────────────────────────────────────────
+    (4,  4,  1): ["STR_DPS", "STR_TANK", "HEALER"],
+    (4,  4,  3): ["STR_DPS", "STR_TANK", "HEALER"],
+    (4,  4,  5): ["STR_DPS", "STR_TANK", "HEALER"],
+    (4,  4,  9): ["STR_DPS", "STR_TANK", "HEALER"],
+    (4,  4, 10): ["STR_DPS", "STR_TANK", "HEALER"],
+    (4,  4,  6): ["STR_DPS", "STR_TANK", "HEALER"],
+    (4,  4,  7): ["STR_DPS", "STR_TANK", "HEALER"],
+    (4,  4,  8): ["STR_DPS", "STR_TANK", "HEALER"],
+    # Misc / Accessories ──────────────────────────────────────────────────────
+    (4,  1, 16): ["AGI_DPS", "STR_DPS", "SP_DPS", "HEALER", "AGI_INT_DPS", "STR_TANK", "AGI_TANK"],  # Cloak
+    (4,  0,  2): ["AGI_DPS", "STR_DPS", "SP_DPS", "HEALER", "AGI_INT_DPS", "STR_TANK", "AGI_TANK"],  # Necklace
+    (4,  0, 11): ["AGI_DPS", "STR_DPS", "SP_DPS", "HEALER", "AGI_INT_DPS", "STR_TANK", "AGI_TANK"],  # Ring
+    (4,  6, 14): ["STR_TANK", "SP_DPS", "HEALER"],               # Shield
+    (4,  0, 23): ["SP_DPS", "HEALER"],                            # Offhand
+}
+
+def get_mass_blueprint(category):
+    """Return a random valid blueprint key for a category without any user prompts."""
+    sig = (category["class"], category["subclass"], category["InventoryType"])
+    pool = MASS_BLUEPRINT_MAP.get(sig)
+    if pool:
+        return random.choice(pool)
+    # Generic fallback by material/class
+    cls, subc = category["class"], category["subclass"]
+    if cls == 2:
+        return random.choice(["AGI_DPS", "STR_DPS", "SP_DPS"])
+    elif subc == 4:   # Plate
+        return random.choice(["STR_DPS", "STR_TANK", "HEALER"])
+    elif subc == 1:   # Cloth
+        return random.choice(["SP_DPS", "HEALER"])
+    else:
+        return random.choice(list(BLUEPRINTS.keys()))
+
+
+def run_mass_creation():
+    """
+    Mass Creation mode: skips all archetype prompts.
+    Asks only: scope (Weapons/Armor/All), Quality, ilvl range,
+    Budget Deviation, Stat Split Deviation, Stat Density, and Item Count.
+    Then generates items using a smart anti-repetition scheduler that
+    spreads types and levels as evenly as possible before repeating.
+    """
+    print("\n" + "="*57)
+    print("  ⚡ MASS CREATION ENGINE — Automated Population Mode   ")
+    print("="*57)
+
+    # ── Scope ────────────────────────────────────────────────────────────────
+    print("\nSelect Item Scope:")
+    print("  [1] Weapons only")
+    print("  [2] Armor only")
+    print("  [3] All (Weapons + Armor)")
+    scope = get_input("Choice: ", lambda x: int(x) if x in ['1', '2', '3'] else int("err"))
+
+    if scope == 1:
+        cat_indices = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]
+    elif scope == 2:
+        cat_indices = list(range(16, 53))
+    else:
+        cat_indices = list(CATEGORIES.keys())
+
+    # ── Quality ──────────────────────────────────────────────────────────────
+    print("\nAvailable Qualities:")
+    for k, v in QUALITIES.items():
+        print(f"  [{k}] {v['name']}")
+    selected_quality_entry = QUALITIES[get_input(
+        "Select Item Quality (Number): ",
+        lambda x: int(x) if int(x) in QUALITIES else int("err")
+    )]
+    quality_code_pool = selected_quality_entry["code"] if selected_quality_entry["multi"] else [selected_quality_entry["code"]]
+
+    # ── ilvl range ───────────────────────────────────────────────────────────
+    print("\nEnter Target Item Level range (e.g. '10-284' for full game, or '50-80'):")
+    ilvl_range = get_input("Choice: ", parse_ilvl_input)
+
+    # ── Budget Deviation ─────────────────────────────────────────────────────
+    variance = get_input(
+        "Enter Budget Quality Variance % (0 to 25, recommended 8): ",
+        lambda x: float(x) / 100.0 if 0 <= float(x) <= 25 else float("err")
+    )
+
+    # ── Stat Split Deviation ─────────────────────────────────────────────────
+    print("\nStat Split Deviation — controls how unevenly stats are spread across slots.")
+    skew_factor = get_input(
+        "Enter Max Stat Split Deviation % (0 = even, 40 = recommended variance): ",
+        lambda x: float(x) if 0 <= float(x) <= 100 else float("err")
+    )
+    dist_mode = 2 if skew_factor > 0 else 1
+
+    # ── Stat Density ─────────────────────────────────────────────────────────
+    print("\nStat Density Rule:")
+    print("  [1] Database-Driven (most authentic)")
+    print("  [2] Progressive Blizzlike (scales with ilvl)")
+    print("  [3] Explicit Manual Count")
+    density_mode = get_input("Select (1/2/3): ", lambda x: int(x) if int(x) in [1,2,3] else int("err"))
+    chosen_density_count = get_input(
+        "Enter exact stat count (1-6): ",
+        lambda x: int(x) if 1 <= int(x) <= 6 else int("err")
+    ) if density_mode == 3 else 0
+
+    # ── Item Count ───────────────────────────────────────────────────────────
+    print("\nNote: Each item is ~3.6 KB in memory.")
+    print("  Practical safe ceiling: ~400,000 items before RAM pressure.")
+    print("  SQL file at 2,000 items ≈ 4 MB | at 50,000 items ≈ 100 MB")
+    quantity = get_input(
+        "How many items to generate? (recommended: 500–5000): ",
+        lambda x: int(x) if int(x) > 0 else int("err")
+    )
+
+    # ── Anti-repetition Scheduler ────────────────────────────────────────────
+    # Build a deck of (cat_idx, ilvl) pairs.
+    # Strategy: for each unique category in the pool, assign ilvl slots spread
+    # evenly across the requested range.  Shuffle the deck, pop items from it,
+    # and reshuffle only when exhausted — this prevents clustering like
+    # "ilvl 44 crossbow, ilvl 45 crossbow" while swords are untouched.
+
+    ilvl_levels   = list(range(ilvl_range[0], ilvl_range[1] + 1))
+    num_cats      = len(cat_indices)
+    num_levels    = len(ilvl_levels)
+
+    # One full "round" = every category × every ilvl (or a sampled subset if huge)
+    # Cap a single round at 50k slots so the deck stays manageable.
+    MAX_DECK_SLOTS = 50_000
+    if num_cats * num_levels <= MAX_DECK_SLOTS:
+        deck_pairs = [(ci, lvl) for ci in cat_indices for lvl in ilvl_levels]
+    else:
+        # Sample proportionally: pick enough ilvl slots per category
+        slots_per_cat = max(1, MAX_DECK_SLOTS // num_cats)
+        sampled_levels = ilvl_levels if len(ilvl_levels) <= slots_per_cat else \
+            random.sample(ilvl_levels, slots_per_cat)
+        deck_pairs = [(ci, lvl) for ci in cat_indices for lvl in sampled_levels]
+
+    random.shuffle(deck_pairs)
+    deck_index = 0  # rolling pointer — reshuffle when exhausted
+
+    generated = 0
+    skipped   = 0
+
+    print(f"\n🚀 Generating {quantity:,} items across {num_cats} category types "
+          f"and {num_levels} ilvl steps...\n")
+
+    for _ in range(quantity):
+        # Pull next (cat_idx, ilvl) from the anti-repetition deck
+        if deck_index >= len(deck_pairs):
+            random.shuffle(deck_pairs)
+            deck_index = 0
+
+        cat_idx, ilvl = deck_pairs[deck_index]
+        deck_index += 1
+
+        category    = CATEGORIES[cat_idx]
+        quality_code = random.choice(quality_code_pool)
+
+        lookup_key = (category["class"], category["subclass"], category["InventoryType"], quality_code)
+        if lookup_key not in lookup_database:
+            skipped += 1
+            continue
+        sheet = lookup_database[lookup_key]
+
+        interpolated = get_interpolated_properties(sheet, ilvl, category["InventoryType"], quality_code)
+        if not interpolated:
+            skipped += 1
+            continue
+
+        # ── Math (identical to manual path) ──────────────────────────────────
+        fuzz_factor  = random.uniform(1.0 - variance, 1.0 + variance)
+        final_budget = int(interpolated["avg_budget"] * fuzz_factor)
+        final_dps    = interpolated["avg_dps"] * fuzz_factor if category["class"] == 2 else 0.0
+
+        dynamic_delay = 0
+        if category["class"] == 2:
+            base_delay    = subclass_delays.get(category["subclass"], category.get("delay", 2600))
+            raw_delay     = random.uniform(base_delay * 0.85, base_delay * 1.15)
+            dynamic_delay = int(round(raw_delay / 100) * 100)
+
+        dmg_min, dmg_max = 0, 0
+        if category["class"] == 2 and final_dps > 0:
+            avg_damage  = final_dps * (dynamic_delay / 1000.0)
+            spread_fuzz = random.uniform(-0.02, 0.02)
+            dmg_min     = int(avg_damage * (0.70 + spread_fuzz))
+            dmg_max     = int(avg_damage * (1.30 + spread_fuzz))
+            final_dps   = round(((dmg_min + dmg_max) / 2) / (dynamic_delay / 1000.0), 2)
+
+        if interpolated["stat_profiles"]:
+            chosen_profile = random.choice(interpolated["stat_profiles"])
+            db_stats_count = chosen_profile.get("num_stats", 2)
+        else:
+            db_stats_count = 2
+
+        if density_mode == 1:
+            num_stats_to_roll = db_stats_count if db_stats_count > 0 else 2
+        elif density_mode == 2:
+            if ilvl < 30:   num_stats_to_roll = random.choices([1, 2], weights=[40, 60], k=1)[0]
+            elif ilvl < 45: num_stats_to_roll = random.choices([2, 3], weights=[65, 35], k=1)[0]
+            elif ilvl < 60: num_stats_to_roll = random.choices([2, 3], weights=[40, 60], k=1)[0]
+            else:           num_stats_to_roll = random.choices([2, 3, 4], weights=[20, 65, 15], k=1)[0]
+        else:
+            num_stats_to_roll = chosen_density_count
+
+        stats = {f"stat_type{i}": 0 for i in range(1, 7)}
+        stats.update({f"stat_value{i}": 0 for i in range(1, 7)})
+
+        if num_stats_to_roll > 0:
+            # ── Blueprint auto-selection (no prompts) ─────────────────────
+            item_blueprint_key = get_mass_blueprint(category)
+            blueprint = BLUEPRINTS.get(item_blueprint_key)
+
+            if blueprint:
+                pool, anchors, current_weights = (
+                    list(blueprint["pool"]),
+                    list(blueprint["anchors"]),
+                    blueprint["weights"].copy()
+                )
+            else:
+                pool, anchors, current_weights = [4, 7], [4, 7], {4: 100, 7: 100}
+
+            if ilvl < 60:
+                forbidden = {28, 30, 35, 36, 44}
+                pool    = [s for s in pool    if s not in forbidden]
+                anchors = [s for s in anchors if s not in forbidden]
+
+            if (category["InventoryType"] in [17, 25, 26] or
+                    category["subclass"] in [1, 5, 6, 8, 10]):
+                pool    = [s for s in pool    if s not in [15, 48]]
+                anchors = [s for s in anchors if s not in [15, 48]]
+
+            if item_blueprint_key == "AGI_TANK":
+                pool    = [s for s in pool    if s != 14]
+                anchors = [s for s in anchors if s != 14]
+
+            chosen_stats = []
+            remaining_num = num_stats_to_roll
+            for a in anchors:
+                if a in pool and a not in chosen_stats:
+                    chosen_stats.append(a)
+                    remaining_num -= 1
+                    if remaining_num <= 0:
+                        break
+
+            remaining_pool = [s for s in pool if s not in chosen_stats]
+            if remaining_pool and remaining_num > 0:
+                actual_extra = min(remaining_num, len(remaining_pool), 6 - len(chosen_stats))
+                for _ in range(actual_extra):
+                    valid_remaining = [s for s in remaining_pool if s not in chosen_stats]
+                    if not valid_remaining:
+                        break
+                    w = [current_weights.get(s, 50) for s in valid_remaining]
+                    chosen_stats.append(random.choices(valid_remaining, weights=w, k=1)[0])
+
+            num_active_stats = len(chosen_stats)
+            shares = [1.0 / num_active_stats for _ in range(num_active_stats)]
+            if dist_mode == 2 and num_active_stats > 1:
+                shares = [max(0.01, s + random.uniform(-skew_factor / 100.0, skew_factor / 100.0))
+                          for s in shares]
+                s_sum  = sum(shares)
+                shares = [s / s_sum for s in shares]
+
+            allocated_values = [max(1, int(final_budget * s)) for s in shares]
+            remainder        = final_budget - sum(allocated_values)
+            if remainder != 0 and allocated_values:
+                max_idx = allocated_values.index(max(allocated_values))
+                allocated_values[max_idx] += remainder
+
+            for idx, stat_type in enumerate(chosen_stats):
+                stats[f"stat_type{idx+1}"]  = stat_type
+                stats[f"stat_value{idx+1}"] = allocated_values[idx]
+
+        # ── Cosmetics ────────────────────────────────────────────────────────
+        m_key = (category["class"], category["subclass"], quality_code)
+        if m_key in material_library:
+            chosen_pair  = random.choice(material_library[m_key])
+            item_material = chosen_pair['Material']
+            item_sheath   = get_sheathe_type(category)
+        else:
+            fallback_key   = (category["class"], category["subclass"])
+            possible_keys  = [k for k in material_library if k[0:2] == fallback_key]
+            if possible_keys:
+                chosen_pair   = random.choice(random.choice([material_library[k] for k in possible_keys]))
+                item_material = chosen_pair['Material']
+                item_sheath   = get_sheathe_type(category)
+            else:
+                item_material, item_sheath = 1, 0
+
+        cat_keys       = (category["class"], category["subclass"])
+        generated_name = generate_item_name((cat_keys[0], cat_keys[1], lookup_key[2]))
+        display_obj    = get_appropriate_display_id(cat_keys, ilvl, quality_code, category["InventoryType"])
+        req_level      = get_appropriate_req_level(cursor, ilvl, quality_code)
+
+        if category['InventoryType'] == 23:
+            avg_armor  = 0.0
+        else:
+            avg_armor  = interpolate_armor(sheet, ilvl) if category['class'] == 4 else 0.0
+        fuzz_factor2   = random.uniform(1.0 - variance, 1.0 + variance)
+        final_armor    = int(avg_armor * fuzz_factor2) if avg_armor > 0 else 0
+
+        base_sell_price  = calculate_item_sell_price(lookup_database, category, quality_code, ilvl)
+        final_sell_price = int(base_sell_price * fuzz_factor2)
+
+        internal_memory.append({
+            "config": category, "quality": quality_code, "ilvl": ilvl,
+            "name": generated_name, "displayid": display_obj.get("id"),
+            "display_source": display_obj,
+            "dmg_min": dmg_min, "dmg_max": dmg_max,
+            "delay": dynamic_delay, "dps": final_dps,
+            "armor": final_armor, "stats": stats, "budget": final_budget,
+            "required_level": req_level, "Material": item_material,
+            "sheath": item_sheath, "sell_price": final_sell_price
+        })
+        generated += 1
+
+        # Lightweight progress ticker every 100 items
+        if generated % 100 == 0 or generated == quantity:
+            pct = generated / quantity * 100
+            bar = "█" * (generated * 20 // quantity) + "░" * (20 - generated * 20 // quantity)
+            print(f"\r  [{bar}] {generated:>5}/{quantity}  ({pct:.0f}%)  — {skipped} skipped", end="", flush=True)
+
+    print(f"\n\n✅ Mass Creation complete!  Generated: {generated:,}  |  Skipped: {skipped}")
+    print(f"   Total items in memory: {len(internal_memory):,}")
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 while True:
     print("\n--- NEW ITEM GENERATION BATCH ---")
 
@@ -741,7 +1110,14 @@ while True:
     print("  [1] Weapons")
     print("  [2] Armor")
     print("  [3] All of the above (random per item)")
-    group_choice = get_input("Choice: ", lambda x: int(x) if x in ['1', '2', '3'] else int("err"))
+    print("  [4] ⚡ Mass Creation (auto-populate, no archetype prompts)")
+    group_choice = get_input("Choice: ", lambda x: int(x) if x in ['1', '2', '3', '4'] else int("err"))
+
+    if group_choice == 4:
+        run_mass_creation()
+        if get_input("\nAdd another batch? (y/n): ", lambda x: x.lower() if x.lower() in ['y', 'n'] else int("err")) == 'n':
+            break
+        continue
 
     # cat_pool = list of (cat_idx, blueprint_key, blueprint_candidates) resolved per item
     # We first collect a pool of candidate cat_indices, then resolve blueprints.
