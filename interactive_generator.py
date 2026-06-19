@@ -27,6 +27,7 @@ except Exception as e:
 try:
     master = joblib.load("blizzlike_master_brain.pkl")
     lookup_database = master["lookup_database"]
+    slot_budget_curves  = master.get("slot_budget_curves", {})
     global_budget_curves = master["global_budget_curves"]
     archetype_profiles = master["archetype_profiles"]
     name_database = master["name_database"]
@@ -36,6 +37,10 @@ try:
 except Exception as e:
     print("❌ Critical Error: Model components failed to load. Run train_brain.py first.")
     exit()
+
+# Global budget nerf applied to every generated item after fuzz.
+# 1.0 = no nerf, 0.90 = 10% nerf, 0.85 = 15% nerf, etc.
+GLOBAL_BUDGET_NERF = 0.90
 
 STAT_NAMES = {
     0: ("Mana", "Primary/Resource"), 1: ("Health", "Primary/Resource"), 3: ("Agility", "Primary"),
@@ -466,20 +471,62 @@ def get_db_connection():
     return mysql.connector.connect(**DB_CONFIG)
 
 def get_appropriate_req_level(cursor, ilvl, quality):
-    # Search for items within +/- 3 levels of target ilvl, same quality
-    query = """
-    SELECT AVG(RequiredLevel) 
-    FROM item_template 
-    WHERE itemlevel BETWEEN %s AND %s 
-    AND Quality = %s 
-    AND RequiredLevel > 1
-    """
-    cursor.execute(query, (ilvl - 10, ilvl + 10, quality))
-    result = cursor.fetchone()[0]
-    
-    # Calculate initial value
-    req_level = int(result) if result else max(1, int(ilvl * 0.75))
-    
+    # Exact match first - if an item already exists at this exact ilvl/quality,
+    # just use its RequiredLevel directly.
+    cursor.execute(
+        """
+        SELECT RequiredLevel FROM item_template
+        WHERE itemlevel = %s AND Quality = %s AND RequiredLevel > 1
+        LIMIT 1
+        """,
+        (ilvl, quality)
+    )
+    exact = cursor.fetchone()
+    if exact:
+        req_level = int(exact[0])
+    else:
+        # Nearest neighbor BELOW target ilvl, same quality
+        cursor.execute(
+            """
+            SELECT itemlevel, RequiredLevel FROM item_template
+            WHERE itemlevel < %s AND Quality = %s AND RequiredLevel > 1
+            ORDER BY itemlevel DESC LIMIT 1
+            """,
+            (ilvl, quality)
+        )
+        low_node = cursor.fetchone()
+
+        # Nearest neighbor ABOVE target ilvl, same quality
+        cursor.execute(
+            """
+            SELECT itemlevel, RequiredLevel FROM item_template
+            WHERE itemlevel > %s AND Quality = %s AND RequiredLevel > 1
+            ORDER BY itemlevel ASC LIMIT 1
+            """,
+            (ilvl, quality)
+        )
+        high_node = cursor.fetchone()
+
+        if low_node and high_node:
+            # Linearly interpolate along the curve formed by the two
+            # nearest same-quality reference items (one below, one above).
+            low_ilvl, low_req = low_node
+            high_ilvl, high_req = high_node
+            if high_ilvl != low_ilvl:
+                t = (ilvl - low_ilvl) / (high_ilvl - low_ilvl)
+                req_level = round(low_req + t * (high_req - low_req))
+            else:
+                req_level = int(low_req)
+        elif low_node:
+            # Only a lower reference point exists - use it directly.
+            req_level = int(low_node[1])
+        elif high_node:
+            # Only a higher reference point exists - use it directly.
+            req_level = int(high_node[1])
+        else:
+            # No reference data at all for this quality - fall back to heuristic.
+            req_level = max(1, int(ilvl * 0.75))
+
     # --- LEVEL CLAMPING LOGIC ---
     # 1. Cap for iLevel 90 and below (Raiding bracket)
     if ilvl <= 90:
@@ -541,6 +588,7 @@ def generate_item_name(category_config):
     adj_pool = ndb.get("adjectives", ["Reinforced"])
     mat_pool = ndb.get("materials", ["Iron"])
     prop_pool = ndb.get("properties", ["of Power"])
+    gen_pool = ndb.get("genitives", [])
     
     # 3. Pull Curated Noun Seeds from the unpacked global blocks
     noun_pool = ndb.get("nouns", ["Blade"])
@@ -561,8 +609,9 @@ def generate_item_name(category_config):
         adj = random.choice(adj_pool) if (adj_pool and random.random() < 0.6) else ""
         mat = random.choice(mat_pool) if (mat_pool and random.random() < 0.4) else ""
         prop = random.choice(prop_pool) if (prop_pool and random.random() < 0.3) else ""
+        gen = random.choice(gen_pool) if (gen_pool and random.random() < 0.1) else ""
         
-        final_name = " ".join(f"{adj} {mat} {noun} {prop}".split())
+        final_name = " ".join(f"{gen} {adj} {mat} {noun} {prop}".split())
         
         loops += 1
         if len(final_name.split()) >= 2 or loops > 20:
@@ -587,21 +636,69 @@ def get_appropriate_display_id(cat_keys, target_ilvl, target_qual, target_inv_ty
     
     # Return match or random fallback from the category pool
     return random.choice(candidates) if candidates else random.choice([d["id"] for d in pool])
-def interpolate_macro_budget(curves, inv_type, qual, target_ilvl):
-    key = (inv_type, qual)
-    if key not in curves: return 0.0
-    nodes = curves[key]
+# Smoothed-curve cache.  Keys are either the 4-tuple (cls, subcls, inv_type, qual)
+# for per-slot curves or the 2-tuple (inv_type, qual) for the coarser fallback.
+_smoothed_budget_cache = {}
+
+def _smooth_nodes(raw_nodes):
+    """Monotonic forward-pass smoother (isotonic regression, 1-D).
+    Ensures avg_budget never decreases as itemlevel increases."""
+    if not raw_nodes:
+        return []
+    sorted_nodes = sorted(raw_nodes, key=lambda n: n["itemlevel"])
+    smoothed, running_max = [], 0.0
+    for n in sorted_nodes:
+        clamped = max(n["avg_budget"], running_max)
+        running_max = clamped
+        smoothed.append({"itemlevel": n["itemlevel"], "avg_budget": clamped})
+    return smoothed
+
+def _get_smoothed_nodes(cls, subcls, inv_type, qual):
+    """
+    Returns monotonically-smoothed budget nodes for a specific slot.
+    Lookup priority:
+      1. slot_budget_curves[(cls, subcls, inv_type, qual)]  -- most specific
+      2. global_budget_curves[(inv_type, qual)]             -- coarse fallback
+    Both are smoothed on first access and cached.
+    """
+    cache_key = (cls, subcls, inv_type, qual)
+    if cache_key in _smoothed_budget_cache:
+        return _smoothed_budget_cache[cache_key]
+
+    # Try fine-grained per-slot curve first
+    raw = slot_budget_curves.get(cache_key)
+    if not raw:
+        # Fall back to coarse (inv_type, qual) curve
+        raw = global_budget_curves.get((inv_type, qual), [])
+
+    result = _smooth_nodes(raw)
+    _smoothed_budget_cache[cache_key] = result
+    return result
+
+def interpolate_macro_budget(cls, subcls, inv_type, qual, target_ilvl):
+    nodes = _get_smoothed_nodes(cls, subcls, inv_type, qual)
+    if not nodes: return 0.0
+    if len(nodes) == 1: return nodes[0]["avg_budget"]
+
+    # Exact match
     for n in nodes:
         if n["itemlevel"] == target_ilvl: return n["avg_budget"]
-    if len(nodes) == 1: return nodes[0]["avg_budget"]
+
+    # Linear interpolation between bracketing nodes
     low_node, high_node = None, None
     for n in nodes:
-        if n["itemlevel"] < target_ilvl: low_node = n
-        if n["itemlevel"] > target_ilvl and high_node is None: high_node = n
+        if n["itemlevel"] < target_ilvl:
+            low_node = n
+        elif n["itemlevel"] > target_ilvl and high_node is None:
+            high_node = n
+            break
+
     if low_node is not None and high_node is not None:
         x0, x1 = low_node["itemlevel"], high_node["itemlevel"]
         t = (target_ilvl - x0) / (x1 - x0)
         return low_node["avg_budget"] + t * (high_node["avg_budget"] - low_node["avg_budget"])
+
+    if low_node is not None: return low_node["avg_budget"]
     return nodes[0]["avg_budget"]
 
 def interpolate_local_dps(nodes, target_ilvl):
@@ -620,9 +717,9 @@ def interpolate_local_dps(nodes, target_ilvl):
         return low_node["avg_dps"] + t * (high_node["avg_dps"] - low_node["avg_dps"])
     return valid_nodes[0]["avg_dps"]
 
-def get_interpolated_properties(ilvl_sheet, target_ilvl, inv_type, qual):
+def get_interpolated_properties(ilvl_sheet, target_ilvl, cls, subcls, inv_type, qual):
     if not ilvl_sheet: return None
-    final_budget = interpolate_macro_budget(global_budget_curves, inv_type, qual, target_ilvl)
+    final_budget = interpolate_macro_budget(cls, subcls, inv_type, qual, target_ilvl)
     final_dps = interpolate_local_dps(ilvl_sheet, target_ilvl)
     closest_node = min(ilvl_sheet, key=lambda x: abs(x["itemlevel"] - target_ilvl))
     return {
@@ -909,11 +1006,22 @@ def run_mass_creation():
     print("  [1] Database-Driven (most authentic)")
     print("  [2] Progressive Blizzlike (scales with ilvl)")
     print("  [3] Explicit Manual Count")
-    density_mode = get_input("Select (1/2/3): ", lambda x: int(x) if int(x) in [1,2,3] else int("err"))
+    print("  [4] Random Range (rolls a random count per item)")
+    density_mode = get_input("Select (1/2/3/4): ", lambda x: int(x) if int(x) in [1,2,3,4] else int("err"))
     chosen_density_count = get_input(
         "Enter exact stat count (1-6): ",
         lambda x: int(x) if 1 <= int(x) <= 6 else int("err")
     ) if density_mode == 3 else 0
+    density_range_min, density_range_max = 0, 0
+    if density_mode == 4:
+        density_range_min = get_input(
+            "Enter minimum stat count (1-6): ",
+            lambda x: int(x) if 1 <= int(x) <= 6 else int("err")
+        )
+        density_range_max = get_input(
+            f"Enter maximum stat count ({density_range_min}-6): ",
+            lambda x: int(x) if density_range_min <= int(x) <= 6 else int("err")
+        )
 
     # ── Item Count ───────────────────────────────────────────────────────────
     print("\nNote: Each item is ~3.6 KB in memory.")
@@ -974,7 +1082,7 @@ def run_mass_creation():
             continue
         sheet = lookup_database[lookup_key]
 
-        interpolated = get_interpolated_properties(sheet, ilvl, category["InventoryType"], quality_code)
+        interpolated = get_interpolated_properties(sheet, ilvl, category["class"], category["subclass"], category["InventoryType"], quality_code)
         if not interpolated:
             skipped += 1
             continue
@@ -1004,6 +1112,8 @@ def run_mass_creation():
         else:
             db_stats_count = 2
 
+        final_budget = int(final_budget * GLOBAL_BUDGET_NERF)
+
         if density_mode == 1:
             num_stats_to_roll = db_stats_count if db_stats_count > 0 else 2
         elif density_mode == 2:
@@ -1011,8 +1121,10 @@ def run_mass_creation():
             elif ilvl < 45: num_stats_to_roll = random.choices([2, 3], weights=[65, 35], k=1)[0]
             elif ilvl < 60: num_stats_to_roll = random.choices([2, 3], weights=[40, 60], k=1)[0]
             else:           num_stats_to_roll = random.choices([2, 3, 4], weights=[20, 65, 15], k=1)[0]
-        else:
+        elif density_mode == 3:
             num_stats_to_roll = chosen_density_count
+        else:  # mode 4: random range
+            num_stats_to_roll = random.randint(density_range_min, density_range_max)
 
         stats = {f"stat_type{i}": 0 for i in range(1, 7)}
         stats.update({f"stat_value{i}": 0 for i in range(1, 7)})
@@ -1260,9 +1372,19 @@ while True:
     skew_factor = get_input("Enter Max Deviation %: ", lambda x: float(x) if 0 <= float(x) <= 100 else float("err")) if dist_mode == 2 else 0.0
 
     print("\nSelect Stat Slot Density Rule:")
-    print("  [1] Database-Driven\n  [2] Progressive Blizzlike\n  [3] Explicit Manual Count")
-    density_mode = get_input("Select Density Rule (1, 2, or 3): ", lambda x: int(x) if int(x) in [1, 2, 3] else int("err"))
+    print("  [1] Database-Driven\n  [2] Progressive Blizzlike\n  [3] Explicit Manual Count\n  [4] Random Range")
+    density_mode = get_input("Select Density Rule (1, 2, 3, or 4): ", lambda x: int(x) if int(x) in [1, 2, 3, 4] else int("err"))
     chosen_density_count = get_input("Enter exact count (1 to 6): ", lambda x: int(x) if 1 <= int(x) <= 6 else int("err")) if density_mode == 3 else 0
+    density_range_min, density_range_max = 0, 0
+    if density_mode == 4:
+        density_range_min = get_input(
+            "Enter minimum stat count (1-6): ",
+            lambda x: int(x) if 1 <= int(x) <= 6 else int("err")
+        )
+        density_range_max = get_input(
+            f"Enter maximum stat count ({density_range_min}-6): ",
+            lambda x: int(x) if density_range_min <= int(x) <= 6 else int("err")
+        )
 
     quantity = get_input("\nHow many items?: ", lambda x: int(x) if int(x) > 0 else int("err"))
 
@@ -1302,7 +1424,7 @@ while True:
         sheet = lookup_database[lookup_key]
 
         # 6. GET INTERPOLATION for THIS specific iLevel
-        interpolated = get_interpolated_properties(sheet, ilvl, category["InventoryType"], quality_code)
+        interpolated = get_interpolated_properties(sheet, ilvl, category["class"], category["subclass"], category["InventoryType"], quality_code)
         
         if not interpolated:
             print(f"⚠️ Interpolation frame fault at iLvl {ilvl}. Skipping.")
@@ -1336,6 +1458,8 @@ while True:
         else:
             db_stats_count = 2
 
+        final_budget = int(final_budget * GLOBAL_BUDGET_NERF)
+
         if density_mode == 1:
             num_stats_to_roll = db_stats_count if db_stats_count > 0 else 2
         elif density_mode == 2:
@@ -1343,8 +1467,10 @@ while True:
             elif ilvl < 45: num_stats_to_roll = random.choices([2, 3], weights=[65, 35], k=1)[0]
             elif ilvl < 60: num_stats_to_roll = random.choices([2, 3], weights=[40, 60], k=1)[0]
             else: num_stats_to_roll = random.choices([2, 3, 4], weights=[20, 65, 15], k=1)[0]
-        else:
+        elif density_mode == 3:
             num_stats_to_roll = chosen_density_count
+        else:  # mode 4: random range
+            num_stats_to_roll = random.randint(density_range_min, density_range_max)
 
         stats = {f"stat_type{i}": 0 for i in range(1, 7)}
         stats.update({f"stat_value{i}": 0 for i in range(1, 7)})
@@ -1463,9 +1589,12 @@ with open(output_filename, "w") as f:
         s = item["stats"]
         description = f"iLvl {item['ilvl']} {c['name']} generated via structural blueprint routing."
         
+        # Apostrophes in genitive names (e.g. Jin'do's) must be doubled for SQL.
+        # The name in internal_memory is unchanged; only the SQL output escapes it.
+        sql_name = item['name'].replace("'", "''")
         sql_string = f"""DELETE FROM `item_template` WHERE `entry` = {current_id};
 INSERT INTO `item_template` (`entry`, `class`, `subclass`, `name`, `displayid`, `Quality`, `InventoryType`, `itemlevel`, `RequiredLevel`, `armor`, `delay`, `dmg_min1`, `dmg_max1`, `dmg_type1`, `stat_type1`, `stat_value1`, `stat_type2`, `stat_value2`, `stat_type3`, `stat_value3`, `stat_type4`, `stat_value4`, `stat_type5`, `stat_value5`, `stat_type6`, `stat_value6`, `Material`, `sheath`, `SellPrice`, `Description`) 
-VALUES ({current_id}, {c['class']}, {c['subclass']}, '{item['name']}', {item['displayid']}, {item['quality']}, {c['InventoryType']}, {item['ilvl']}, {item['required_level']}, {item.get('armor', 0)}, {item['delay']}, {item['dmg_min']}, {item['dmg_max']}, {c['dmg_type1']}, {s['stat_type1']}, {s['stat_value1']}, {s['stat_type2']}, {s['stat_value2']}, {s['stat_type3']}, {s['stat_value3']}, {s['stat_type4']}, {s['stat_value4']}, {s['stat_type5']}, {s['stat_value5']}, {s['stat_type6']}, {s['stat_value6']}, {item['Material']}, {item['sheath']}, {item.get('sell_price', 0)},  '{description}');\n"""
+VALUES ({current_id}, {c['class']}, {c['subclass']}, '{sql_name}', {item['displayid']}, {item['quality']}, {c['InventoryType']}, {item['ilvl']}, {item['required_level']}, {item.get('armor', 0)}, {item['delay']}, {item['dmg_min']}, {item['dmg_max']}, {c['dmg_type1']}, {s['stat_type1']}, {s['stat_value1']}, {s['stat_type2']}, {s['stat_value2']}, {s['stat_type3']}, {s['stat_value3']}, {s['stat_type4']}, {s['stat_value4']}, {s['stat_type5']}, {s['stat_value5']}, {s['stat_type6']}, {s['stat_value6']}, {item['Material']}, {item['sheath']}, {item.get('sell_price', 0)},  '{description}');\n"""
         f.write(sql_string)
         
         combat_info = f" ({item['dps']} DPS | Min-Max: {item['dmg_min']}-{item['dmg_max']})" if c['class'] == 2 else " (Armor Piece)"
