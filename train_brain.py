@@ -24,27 +24,107 @@ print("Step 2: Extracting baseline reference frames...")
 query = """
     SELECT entry, name, itemlevel, Quality, class, subclass, InventoryType, displayid, delay, 
            dmg_min1, dmg_max1, armor, Material, sheath, SellPrice,
-           stat_type1, stat_value1, stat_type2, stat_value2, stat_type3, stat_value3, stat_type4, stat_value4,
+           stat_type1,  stat_value1,  stat_type2,  stat_value2,
+           stat_type3,  stat_value3,  stat_type4,  stat_value4,
+           stat_type5,  stat_value5,  stat_type6,  stat_value6,
+           stat_type7,  stat_value7,  stat_type8,  stat_value8,
+           stat_type9,  stat_value9,  stat_type10, stat_value10,
+           spellid_1, spelltrigger_1, spellid_2, spelltrigger_2,
+           spellid_3, spelltrigger_3, spellid_4, spelltrigger_4,
+           spellid_5, spelltrigger_5,
            RandomProperty, RandomSuffix
     FROM item_template 
     WHERE itemlevel BETWEEN 10 AND 284 
-      AND class IN (2, 4);
+      AND (
+        class IN (2, 4)                        -- Weapons + Armor
+        OR InventoryType IN (23, 28)           -- Held In Off-Hand / Relic frills
+        OR (class = 15 AND InventoryType > 0)  -- Miscellaneous equippable items (off-hands, idols, totems, librams)
+      );
 """
 df = pd.read_sql(query, conn)
 conn.close()
 
 print(f"Successfully loaded {len(df)} templates. Building Synergistic Cluster Matrices...")
 
+# WoW stat budget costs (points per 1 unit of stat, relative to primary stats = 1.0).
+# Spell Power and Healing Power are cheaper per budget point in Blizzard's formula,
+# meaning you get fewer raw points of SP for the same budget cost.
+# This table lets total_budget reflect *true* item budget rather than raw stat sums.
+STAT_BUDGET_COST = {
+    # Primary stats -- 1 budget point per 1 stat
+    3:  1.0,   # Agility
+    4:  1.0,   # Strength
+    5:  1.0,   # Intellect
+    6:  1.0,   # Spirit
+    7:  1.0,   # Stamina
+    # Secondary combat ratings -- 1 budget point per 1 rating
+    31: 1.0,   # Hit Rating
+    32: 1.0,   # Crit Rating
+    36: 1.0,   # Haste Rating
+    37: 1.0,   # Dodge Rating
+    38: 1.0,   # Parry Rating
+    43: 1.0,   # MP5 (mana per 5 sec)
+    44: 1.0,   # Attack Power
+    # Spell Power (stat 45) -- costs ~2 budget points per 1 SP in TBC/WotLK itemization
+    # This means an item with +18 SP "uses" 36 budget points, equivalent to +36 of a primary stat.
+    # Without this weight, the brain underestimates the budget of SP items and generates
+    # weaker-than-intended off-hands for casters.
+    45: 2.0,   # Spell Power / Spell Damage
+    # Armor penetration, resilience
+    35: 1.0,
+    40: 1.0,
+}
+
+# Budget bonus added per on-equip passive spell slot (spelltrigger == 1).
+# Calibrated so that at ilvl 66 (Jin'do's Bag of Whammies) each passive
+# spell contributes ~22 budget points -- matching the observed gap between
+# the naive stat-slot sum (~19) and the item's true power (~63).
+# Formula: itemlevel * EQUIP_SPELL_BUDGET_FACTOR
+# At ilvl 66:  66 * 0.65 ~ 43  (two passive spells -> +86, total ~ 105... too high)
+# Actual gap per spell: (63 - 19) / 2 spells = 22 pts  -> factor = 22/66 = 0.33
+EQUIP_SPELL_BUDGET_FACTOR = 0.33
+
+def compute_weighted_budget(row):
+    total = 0.0
+    # -- Stat slots (up to 10) --
+    for i in range(1, 11):
+        col = f'stat_type{i}'
+        if col not in row.index: break
+        stype = int(row[col])
+        sval  = int(row[f'stat_value{i}'])
+        if stype != 0 and sval > 0:
+            cost = STAT_BUDGET_COST.get(stype, 1.0)
+            total += sval * cost
+    # -- On-equip passive spell slots (spelltrigger == 1) --
+    # Each occupied on-equip slot is worth itemlevel * EQUIP_SPELL_BUDGET_FACTOR
+    # budget points.  Procs (trigger 0) and use-effects (trigger 2) are
+    # intentionally excluded -- they don't contribute passive stat budget.
+    ilvl = int(row['itemlevel'])
+    for i in range(1, 6):
+        sid_col = f'spellid_{i}'
+        trg_col = f'spelltrigger_{i}'
+        if sid_col not in row.index or trg_col not in row.index: continue
+        try:
+            sid = int(row[sid_col])
+            trg = int(row[trg_col])
+        except (ValueError, TypeError):
+            continue
+        if sid > 0 and trg == 1:  # 1 = on-equip passive aura
+            total += ilvl * EQUIP_SPELL_BUDGET_FACTOR
+    return total
+
 # Compute basic metrics
-df['total_budget'] = df['stat_value1'] + df['stat_value2'] + df['stat_value3'] + df['stat_value4']
+df['total_budget'] = df.apply(compute_weighted_budget, axis=1)
 df['dps'] = 0.0
 weapon_mask = (df['class'] == 2) & (df['delay'] > 0)
 df.loc[weapon_mask, 'dps'] = ((df.loc[weapon_mask, 'dmg_min1'] + df.loc[weapon_mask, 'dmg_max1']) / 2) / (df.loc[weapon_mask, 'delay'] / 1000.0)
 
 def count_active_stats(row):
     count = 0
-    for i in range(1, 5):
-        if int(row[f'stat_type{i}']) != 0 and int(row[f'stat_value{i}']) > 0:
+    for i in range(1, 11):  # item_template has 10 stat slots
+        col = f'stat_type{i}'
+        if col not in row.index: break
+        if int(row[col]) != 0 and int(row[f'stat_value{i}']) > 0:
             count += 1
     return count
 df['num_stats'] = df.apply(count_active_stats, axis=1)
@@ -62,8 +142,10 @@ ARCHETYPES = {
 
 def classify_row_archetype(row):
     item_stats = set()
-    for i in range(1, 5):
-        st = int(row[f'stat_type{i}'])
+    for i in range(1, 11):  # all 10 stat slots
+        col = f'stat_type{i}'
+        if col not in row.index: break
+        st = int(row[col])
         sv = int(row[f'stat_value{i}'])
         if st != 0 and sv > 0: item_stats.add(st)
     
@@ -92,28 +174,58 @@ for (cls, subcls, inv_type), group in df.groupby(['class', 'subclass', 'Inventor
         "stats": arch_stats
     }
 
-# Step 2A: Build Macro Budget Curves by InventoryType and Quality
-print(" -> Compiling Slot-Level Macro Budget Curves...")
-global_budget_curves = {}
-for (inv_type, qual), group in df.groupby(['InventoryType', 'Quality']):
+# Step 2A: Build Per-Slot Budget Curves keyed by (class, subclass, InventoryType, Quality).
+# This replaces the old global_budget_curves which grouped all items of the same
+# InventoryType together regardless of material (e.g. cloth/leather/mail/plate helms
+# all shared one curve).  Fine-grained curves mean each slot type gets a budget
+# baseline from its own population rather than a cross-material average.
+#
+# Off-hand frills (InventoryType 23) receive a 10% budget nerf applied here at
+# build time so the generator doesn't need any special-case logic.
+OFFHAND_BUDGET_NERF = 0.90  # 10% reduction for InventoryType 23
+
+print(" -> Compiling Per-Slot Budget Curves (class, subclass, InventoryType, Quality)...")
+slot_budget_curves = {}
+for (cls, subcls, inv_type, qual), group in df.groupby(['class', 'subclass', 'InventoryType', 'Quality']):
     curve_nodes = []
     for ilvl, sub_group in group.groupby('itemlevel'):
-        # Exclude RandomProperty/RandomSuffix items explicitly, not just via
-        # total_budget > 0. Some of these still carry a nonzero *base* stat
-        # total (the random component is generated at loot time and never
-        # touches item_template), so relying on total_budget alone lets a
-        # partially-itemized random item sneak in and drag that single
-        # itemlevel's average down -- exactly the kind of localized dip that
-        # makes a higher-ilvl node look weaker than its lower-ilvl neighbor.
+        # Exclude RandomProperty/RandomSuffix items: their random component is
+        # generated at loot time and never stored in item_template, so their
+        # total_budget reflects only the base stats and drags the average down.
         clean_rows = sub_group[
             (sub_group['RandomProperty'] == 0) & (sub_group['RandomSuffix'] == 0)
         ]
         valid_budget_rows = clean_rows[clean_rows['total_budget'] > 0]['total_budget']
         if not valid_budget_rows.empty:
+            avg_bud = float(valid_budget_rows.mean())
+            # Apply off-hand nerf at curve-build time
+            if int(inv_type) == 23:
+                avg_bud *= OFFHAND_BUDGET_NERF
             curve_nodes.append({
                 "itemlevel": int(ilvl),
-                "avg_budget": float(valid_budget_rows.mean())
+                "avg_budget": avg_bud
             })
+    if curve_nodes:
+        slot_budget_curves[
+            (int(cls), int(subcls), int(inv_type), int(qual))
+        ] = sorted(curve_nodes, key=lambda x: x['itemlevel'])
+
+# Keep a coarser (inv_type, qual) index as a fallback for the generator.
+# Used when a specific (class, subclass, inv_type, qual) combo has too few
+# items to form a reliable curve (e.g. a very rare quality tier).
+global_budget_curves = {}  # (inv_type, qual) -> nodes  -- fallback only
+for (inv_type, qual), group in df.groupby(['InventoryType', 'Quality']):
+    curve_nodes = []
+    for ilvl, sub_group in group.groupby('itemlevel'):
+        clean_rows = sub_group[
+            (sub_group['RandomProperty'] == 0) & (sub_group['RandomSuffix'] == 0)
+        ]
+        valid_budget_rows = clean_rows[clean_rows['total_budget'] > 0]['total_budget']
+        if not valid_budget_rows.empty:
+            avg_bud = float(valid_budget_rows.mean())
+            if int(inv_type) == 23:
+                avg_bud *= OFFHAND_BUDGET_NERF
+            curve_nodes.append({"itemlevel": int(ilvl), "avg_budget": avg_bud})
     if curve_nodes:
         global_budget_curves[(int(inv_type), int(qual))] = sorted(curve_nodes, key=lambda x: x['itemlevel'])
 
@@ -181,7 +293,14 @@ def build_slot_fallback(where_clause, label, is_weapon=False):
     slot_query = f"""
         SELECT entry, name, itemlevel, Quality, class, subclass, InventoryType, displayid, delay,
                dmg_min1, dmg_max1, armor, Material, sheath, SellPrice,
-               stat_type1, stat_value1, stat_type2, stat_value2, stat_type3, stat_value3, stat_type4, stat_value4,
+               stat_type1,  stat_value1,  stat_type2,  stat_value2,
+               stat_type3,  stat_value3,  stat_type4,  stat_value4,
+               stat_type5,  stat_value5,  stat_type6,  stat_value6,
+               stat_type7,  stat_value7,  stat_type8,  stat_value8,
+               stat_type9,  stat_value9,  stat_type10, stat_value10,
+               spellid_1, spelltrigger_1, spellid_2, spelltrigger_2,
+               spellid_3, spelltrigger_3, spellid_4, spelltrigger_4,
+               spellid_5, spelltrigger_5,
                RandomProperty, RandomSuffix
         FROM item_template
         WHERE itemlevel BETWEEN 10 AND 284
@@ -192,7 +311,7 @@ def build_slot_fallback(where_clause, label, is_weapon=False):
 
     print(f"   Found {len(slot_df)} {label} templates. Building {label} lookup entries...")
 
-    slot_df['total_budget'] = slot_df['stat_value1'] + slot_df['stat_value2'] + slot_df['stat_value3'] + slot_df['stat_value4']
+    slot_df['total_budget'] = slot_df.apply(compute_weighted_budget, axis=1)
     slot_df['num_stats'] = slot_df.apply(count_active_stats, axis=1)
 
     slot_df['dps'] = 0.0
@@ -246,6 +365,11 @@ build_slot_fallback("InventoryType = 16", "Cloak", is_weapon=False)
 # Bow (class 2, subclass 2) -- ranged weapon, computed via dps instead of armor
 build_slot_fallback("class = 2 AND subclass = 2", "Bow", is_weapon=True)
 
+# Off-hands / Held-In-Hand frills (InventoryType 23) -- covers tomes, orbs, idols, relics etc.
+# These are class 15 in item_template and were excluded from the original class IN (2,4) query,
+# which is why generated off-hands had far too few stats for their item level.
+build_slot_fallback("InventoryType = 23 OR InventoryType = 28", "OffHand_Frill", is_weapon=False)
+
 print("Step 3: Compiling Structural Naming Dictionaries...")
 
 ADJECTIVE_WHITELIST = [
@@ -275,27 +399,27 @@ ADJECTIVE_WHITELIST = [
 ]
 GENITIVE_WHITELIST = [
     # --- Warcraft Alliance Icons ---
-    "Arthas''s", "Uther''s", "Varian''s", "Anduin''s", "Jaina''s", "Genn''s", 
-    "Magni''s", "Muradin''s", "Malfurion''s", "Tyrande''s", "Turalyon''s", 
-    "Alleria''s", "Khadgar''s", "Medivh''s",
+    "Arthas's", "Uther's", "Varian's", "Anduin's", "Jaina's", "Genn's", 
+    "Magni's", "Muradin's", "Malfurion's", "Tyrande's", "Turalyon's", 
+    "Alleria's", "Khadgar's", "Medivh's",
 
     # --- Warcraft Horde Icons ---
-    "Thrall''s", "Garrosh''s", "Sylvanas''s", "Vol''jin''s", "Cairne''s", 
-    "Baine''s", "Grommash''s", "Rexxar''s", "Saurfang''s", "Rokhan''s", 
-    "Gazlowe''s", "Gul''dan''s",
+    "Thrall's", "Garrosh's", "Sylvanas's", "Vol'jin's", "Cairne's", 
+    "Baine's", "Grommash's", "Rexxar's", "Saurfang's", "Rokhan's", 
+    "Gazlowe's", "Gul'dan's",
 
     # --- Warcraft Villains & Cosmic ---
-    "Illidan''s", "Ner''zhul''s", "Kel''Thuzad''s", "Anub''arak''s", "Ragnaros''s", 
-    "Deathwing''s", "Onyxia''s", "Kael''thas''s", "Kil''jaeden''s", "Archimonde''s", 
-    "Lich''s", "Dreadlord''s", "Valkyr''s",
+    "Illidan's", "Ner'zhul's", "Kel'Thuzad's", "Anub'arak's", "Ragnaros's", 
+    "Deathwing's", "Onyxia's", "Kael'thas's", "Kil'jaeden's", "Archimonde's", 
+    "Lich's", "Dreadlord's", "Valkyr's",
 
     # --- Fantasy Archetypes & Titles ---
-    "King''s", "Queen''s", "Warchief''s", "Warlord''s", "Archmage''s", 
-    "Highlord''s", "Crusader''s", "Sentinel''s", "Dragon''s", "Wyrm''s", 
-    "Titan''s", "Demon''s", "Giant''s", "Warden''s", "Guardian''s", 
-    "Assassin''s", "Captain''s", "Paladin''s", "Shaman''s", "Druid''s", 
-    "Sorcerer''s", "Hero''s", "Outlaw''s", "Hunter''s", "Seeker''s", 
-    "Vindicator''s", "Exarch''s", "Elder''s", "Ancient''s", "Raven''s"
+    "King's", "Queen's", "Warchief's", "Warlord's", "Archmage's", 
+    "Highlord's", "Crusader's", "Sentinel's", "Dragon's", "Wyrm's", 
+    "Titan's", "Demon's", "Giant's", "Warden's", "Guardian's", 
+    "Assassin's", "Captain's", "Paladin's", "Shaman's", "Druid's", 
+    "Sorcerer's", "Hero's", "Outlaw's", "Hunter's", "Seeker's", 
+    "Vindicator's", "Exarch's", "Elder's", "Ancient's", "Raven's"
 ]
 
 
@@ -777,8 +901,9 @@ for (c, sc, q), group in df.groupby(['class', 'subclass', 'Quality']):
 # Save this library alongside your other brain data
 joblib.dump(material_library, 'material_library.joblib')
 master_brain = {
-    "lookup_database": lookup_database, 
-    "global_budget_curves": global_budget_curves,
+    "lookup_database": lookup_database,
+    "slot_budget_curves": slot_budget_curves,
+    "global_budget_curves": global_budget_curves,  # fallback
     "archetype_profiles": archetype_profiles,
     "name_database": name_database,
     "subclass_delays": subclass_delays,
