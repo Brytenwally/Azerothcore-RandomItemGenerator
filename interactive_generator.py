@@ -471,62 +471,20 @@ def get_db_connection():
     return mysql.connector.connect(**DB_CONFIG)
 
 def get_appropriate_req_level(cursor, ilvl, quality):
-    # Exact match first - if an item already exists at this exact ilvl/quality,
-    # just use its RequiredLevel directly.
-    cursor.execute(
-        """
-        SELECT RequiredLevel FROM item_template
-        WHERE itemlevel = %s AND Quality = %s AND RequiredLevel > 1
-        LIMIT 1
-        """,
-        (ilvl, quality)
-    )
-    exact = cursor.fetchone()
-    if exact:
-        req_level = int(exact[0])
-    else:
-        # Nearest neighbor BELOW target ilvl, same quality
-        cursor.execute(
-            """
-            SELECT itemlevel, RequiredLevel FROM item_template
-            WHERE itemlevel < %s AND Quality = %s AND RequiredLevel > 1
-            ORDER BY itemlevel DESC LIMIT 1
-            """,
-            (ilvl, quality)
-        )
-        low_node = cursor.fetchone()
-
-        # Nearest neighbor ABOVE target ilvl, same quality
-        cursor.execute(
-            """
-            SELECT itemlevel, RequiredLevel FROM item_template
-            WHERE itemlevel > %s AND Quality = %s AND RequiredLevel > 1
-            ORDER BY itemlevel ASC LIMIT 1
-            """,
-            (ilvl, quality)
-        )
-        high_node = cursor.fetchone()
-
-        if low_node and high_node:
-            # Linearly interpolate along the curve formed by the two
-            # nearest same-quality reference items (one below, one above).
-            low_ilvl, low_req = low_node
-            high_ilvl, high_req = high_node
-            if high_ilvl != low_ilvl:
-                t = (ilvl - low_ilvl) / (high_ilvl - low_ilvl)
-                req_level = round(low_req + t * (high_req - low_req))
-            else:
-                req_level = int(low_req)
-        elif low_node:
-            # Only a lower reference point exists - use it directly.
-            req_level = int(low_node[1])
-        elif high_node:
-            # Only a higher reference point exists - use it directly.
-            req_level = int(high_node[1])
-        else:
-            # No reference data at all for this quality - fall back to heuristic.
-            req_level = max(1, int(ilvl * 0.75))
-
+    # Search for items within +/- 3 levels of target ilvl, same quality
+    query = """
+    SELECT AVG(RequiredLevel) 
+    FROM item_template 
+    WHERE itemlevel BETWEEN %s AND %s 
+    AND Quality = %s 
+    AND RequiredLevel > 1
+    """
+    cursor.execute(query, (ilvl - 10, ilvl + 10, quality))
+    result = cursor.fetchone()[0]
+    
+    # Calculate initial value
+    req_level = int(result) if result else max(1, int(ilvl * 0.75))
+    
     # --- LEVEL CLAMPING LOGIC ---
     # 1. Cap for iLevel 90 and below (Raiding bracket)
     if ilvl <= 90:
@@ -588,7 +546,6 @@ def generate_item_name(category_config):
     adj_pool = ndb.get("adjectives", ["Reinforced"])
     mat_pool = ndb.get("materials", ["Iron"])
     prop_pool = ndb.get("properties", ["of Power"])
-    gen_pool = ndb.get("genitives", [])
     
     # 3. Pull Curated Noun Seeds from the unpacked global blocks
     noun_pool = ndb.get("nouns", ["Blade"])
@@ -609,9 +566,8 @@ def generate_item_name(category_config):
         adj = random.choice(adj_pool) if (adj_pool and random.random() < 0.6) else ""
         mat = random.choice(mat_pool) if (mat_pool and random.random() < 0.4) else ""
         prop = random.choice(prop_pool) if (prop_pool and random.random() < 0.3) else ""
-        gen = random.choice(gen_pool) if (gen_pool and random.random() < 0.1) else ""
         
-        final_name = " ".join(f"{gen} {adj} {mat} {noun} {prop}".split())
+        final_name = " ".join(f"{adj} {mat} {noun} {prop}".split())
         
         loops += 1
         if len(final_name.split()) >= 2 or loops > 20:
@@ -904,14 +860,14 @@ MASS_BLUEPRINT_MAP = {
     (4,  2,  7): ["AGI_DPS", "AGI_TANK", "HEALER", "SP_DPS", "AGI_INT_DPS"],
     (4,  2,  8): ["AGI_DPS", "AGI_TANK", "HEALER", "SP_DPS", "AGI_INT_DPS"],
     # Armor – Mail ────────────────────────────────────────────────────────────
-    (4,  3,  1): ["AGI_DPS", "STR_DPS", "HEALER", "SP_DPS", "AGI_INT_DPS"],
-    (4,  3,  3): ["AGI_DPS", "STR_DPS", "HEALER", "SP_DPS", "AGI_INT_DPS"],
-    (4,  3,  5): ["AGI_DPS", "STR_DPS", "HEALER", "SP_DPS", "AGI_INT_DPS"],
-    (4,  3,  9): ["AGI_DPS", "STR_DPS", "HEALER", "SP_DPS", "AGI_INT_DPS"],
-    (4,  3, 10): ["AGI_DPS", "STR_DPS", "HEALER", "SP_DPS", "AGI_INT_DPS"],
-    (4,  3,  6): ["AGI_DPS", "STR_DPS", "HEALER", "SP_DPS", "AGI_INT_DPS"],
-    (4,  3,  7): ["AGI_DPS", "STR_DPS", "HEALER", "SP_DPS", "AGI_INT_DPS"],
-    (4,  3,  8): ["AGI_DPS", "STR_DPS", "HEALER", "SP_DPS", "AGI_INT_DPS"],
+    (4,  3,  1): ["AGI_DPS", "STR_DPS", "STR_TANK", "HEALER", "SP_DPS", "AGI_INT_DPS"],
+    (4,  3,  3): ["AGI_DPS", "STR_DPS", "STR_TANK", "HEALER", "SP_DPS", "AGI_INT_DPS"],
+    (4,  3,  5): ["AGI_DPS", "STR_DPS", "STR_TANK", "HEALER", "SP_DPS", "AGI_INT_DPS"],
+    (4,  3,  9): ["AGI_DPS", "STR_DPS", "STR_TANK", "HEALER", "SP_DPS", "AGI_INT_DPS"],
+    (4,  3, 10): ["AGI_DPS", "STR_DPS", "STR_TANK", "HEALER", "SP_DPS", "AGI_INT_DPS"],
+    (4,  3,  6): ["AGI_DPS", "STR_DPS", "STR_TANK", "HEALER", "SP_DPS", "AGI_INT_DPS"],
+    (4,  3,  7): ["AGI_DPS", "STR_DPS", "STR_TANK", "HEALER", "SP_DPS", "AGI_INT_DPS"],
+    (4,  3,  8): ["AGI_DPS", "STR_DPS", "STR_TANK", "HEALER", "SP_DPS", "AGI_INT_DPS"],
     # Armor – Plate ───────────────────────────────────────────────────────────
     (4,  4,  1): ["STR_DPS", "STR_TANK", "HEALER"],
     (4,  4,  3): ["STR_DPS", "STR_TANK", "HEALER"],
@@ -1215,7 +1171,7 @@ def run_mass_creation():
         display_obj    = get_appropriate_display_id(cat_keys, ilvl, quality_code, category["InventoryType"])
         req_level      = get_appropriate_req_level(cursor, ilvl, quality_code)
 
-        if category['InventoryType'] == 23:
+        if category['InventoryType'] in (2, 11, 23):  # Neck, Ring, Off-hand frill
             avg_armor  = 0.0
         else:
             avg_armor  = interpolate_armor(sheet, ilvl) if category['class'] == 4 else 0.0
@@ -1557,7 +1513,7 @@ while True:
         display_obj = get_appropriate_display_id(cat_keys, ilvl, quality_code, category["InventoryType"])
         predicted_display_id = display_obj["id"]
         req_level = get_appropriate_req_level(cursor, ilvl, quality_code)
-        if category['InventoryType'] == 23: avg_armor = 0.0
+        if category['InventoryType'] in (2, 11, 23): avg_armor = 0.0  # Neck, Ring, Off-hand frill
         else: avg_armor = interpolate_armor(sheet, ilvl) if category['class'] == 4 else 0.0
         fuzz_factor = random.uniform(1.0 - variance, 1.0 + variance)
         final_armor = int(avg_armor * fuzz_factor) if avg_armor > 0 else 0
