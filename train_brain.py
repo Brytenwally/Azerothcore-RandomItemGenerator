@@ -375,27 +375,39 @@ print("Step 3: Compiling Structural Naming Dictionaries...")
 ADJECTIVE_WHITELIST = [
     # Combat / Aggressive
     "Furious", "Brutal", "Searing", "Sacrificial", "Boundless", "Fighting", 
-    "Savage", "Vicious", "Deadly", "Mighty", "Fierce", "Piercing", "Crushing",
+    "Savage", "Vicious", "Deadly", "Mighty", "Fierce", "Piercing", "Crushing", 
+    "Unrelenting", "Blood-soaked", "Sundering", "Relentless", "Vengeful", 
+    "Savage", "Raging", "Merciless", "War-torn", "Bladed", "Sharp",
     
     # Durable / Sturdy
     "Reinforced", "Ancient", "Tempered", "Hardened", "Stalwart", "Indestructible",
     "Bulwark", "Iron-bound", "Heavy", "Jagged", "Solid",
+    "Weathered", "Battle-hardened", "Heavy-set", "Massive", "Unbroken", 
+    "Reinforced", "Sturdy", "Rugged", "Shielding", "Forged",
     
     # Magical / Arcane
     "Mystic", "Arcane", "Ethereal", "Runed", "Enchanted", "Astral", 
     "Spectral", "Void", "Primal", "Crystalline",
+    "Phantasmal", "Transcendent", "Mana-infused", "Flickering", "Pulsing", 
+    "Resonant", "Luminous", "Shimmering", "Charged", "Woven",
     
     # Elemental / Nature
     "Molten", "Frozen", "Storm-forged", "Blazing", "Frost", "Thunder", 
     "Tidal", "Verdant", "Wild", "Volcanic", "Gale",
+    "Ember", "Frost-touched", "Storm-battered", "Verdant", "Petrified", 
+    "Solar", "Lunar", "Gale-force", "Earthen", "Wild",
     
     # Dark / Ominous
     "Dread", "Blighted", "Cursed", "Wicked", "Forsaken", "Sinister", 
     "Grim", "Dire", "Haunted", "Shadowed", "Grave",
+    "Malevolent", "Hollow", "Whispering", "Morbid", "Tainted", 
+    "Corrupted", "Necrotic", "Shadow-steeped", "Foul", "Abyssal", 
     
     # Noble / Radiant
     "Divine", "Hallowed", "Sacred", "Exalted", "Glorious", "Sovereign", 
-    "Imperial", "Royal", "Noble", "Radiant", "Valiant", "Heroic"
+    "Imperial", "Royal", "Noble", "Radiant", "Valiant", "Heroic",
+    "Illustrious", "Righteous", "Golden", "Serene", "Majestic", 
+    "Vigilant", "Eternal", "Glorified", "Pious", "Grand"
 ]
 GENITIVE_WHITELIST = [
     # --- Warcraft Alliance Icons ---
@@ -411,7 +423,8 @@ GENITIVE_WHITELIST = [
     # --- Warcraft Villains & Cosmic ---
     "Illidan's", "Ner'zhul's", "Kel'Thuzad's", "Anub'arak's", "Ragnaros's", 
     "Deathwing's", "Onyxia's", "Kael'thas's", "Kil'jaeden's", "Archimonde's", 
-    "Lich's", "Dreadlord's", "Valkyr's",
+    "Lich's", "Dreadlord's", "Valkyr's", "Naaru's", "Old God's", "Faceless's", "Troll's", "Orc's", 
+    "High-Elf's", "Blood-Elf's", "Forsaken's", "Worgen's", "Pandaren's",
 
     # --- Fantasy Archetypes & Titles ---
     "King's", "Queen's", "Warchief's", "Warlord's", "Archmage's", 
@@ -419,14 +432,19 @@ GENITIVE_WHITELIST = [
     "Titan's", "Demon's", "Giant's", "Warden's", "Guardian's", 
     "Assassin's", "Captain's", "Paladin's", "Shaman's", "Druid's", 
     "Sorcerer's", "Hero's", "Outlaw's", "Hunter's", "Seeker's", 
-    "Vindicator's", "Exarch's", "Elder's", "Ancient's", "Raven's"
+    "Vindicator's", "Exarch's", "Elder's", "Ancient's", "Raven's",
+    "Champion's", "Prophet's", "Avenger's", "Marauder's", "Zealot's", 
+    "Renegade's", "Scavenger's", "Voyager's", "Ascendant's", "Warlock's", 
+    "Monk's", "Battlemage's", "Inquisitor's", "Warmonger's", "Exile's",
+    "Spirit-walker's", "Death-knight's", "Demon-hunter's"
 ]
 
 
 MATERIAL_WHITELIST = [
     # --- Classic/Basic Metals ---
     "Copper", "Bronze", "Iron", "Steel", "Tin", "Lead", 
-    "Silver", "Gold", "Brass",
+    "Silver", "Gold", "Brass", "Quicksilver", "Star-iron", "Cold-iron", "Ghost-iron", 
+    "Blood-steel", "Sun-gold", "Fel-steel", "Meteorite",
     
     # --- Advanced/Legendary Metals ---
     "Mithril", "Truesilver", "Arcanite", "Thorium", 
@@ -435,6 +453,9 @@ MATERIAL_WHITELIST = [
     # --- Exotic/Northern/High-End ---
     "Cobalt", "Saronite", "Titanium", "Elementium", 
     "Obsidian", "Shadowsteel", "Spirit-iron", "Void-forged",
+    "Dragon-scale", "Demon-hide", "Void-crystal", "Soul-shard", 
+    "Fel-glass", "Storm-leather", "Ironbark", "Moon-silk", 
+    "Blight-wood", "Obsidian-shard", "Nether-silk",
     
     # --- Other Crafting Materials ---
     "Bone", "Wood", "Oak", "Ash", "Ivory", "Marble", "Granite"
@@ -444,6 +465,8 @@ PROPERTY_WHITELIST = [
     "of Grievance", "of Massacre", "of the Scourge", "of Crimson Agony", 
     "of Ebon Depths", "of the Void", "of Lost Souls", "of the Grave", 
     "of Eternal Night", "of Ruin", "of Despair", "of Sinister Light",
+    "of Endless Grief", "of Silent Screams", "of Rotting Vigor", 
+    "of the Abyssal Maw", "of Dark Whispers", "of the Plague",
     
     # --- Elemental & Nature ---
     "of the Frozen Wastes", "of Eternal Storms", "of the Molten Core", 
@@ -454,17 +477,23 @@ PROPERTY_WHITELIST = [
     "of the Kirin Tor", "of the Silver Hand", "of the Ebon Blade", 
     "of the Cenarion Circle", "of the Dragonflight", "of the Horde", 
     "of the Alliance", "of the Burning Legion", "of the Argent Crusade",
+    "of the Shattered Sun", "of the Scarlet Crusade", "of the Darkmoon", 
+    "of the Frostwolf", "of the Ashen Verdict", "of the Sunreavers",
     
     # --- Abstract & Mystical ---
     "of Ancient Echoes", "of Forbidden Secrets", "of Unspoken Truths", 
     "of Fallen Kings", "of Broken Promises", "of Sovereign Might", 
     "of Infinite Wisdom", "of the Stars", "of the Moon", "of the Sun",
     "of Timeless Travel", "of the Seeker", "of Hidden Paths",
+    "of Waking Dreams", "of Forgotten Lore", "of Primal Instinct", 
+    "of Noble Sacrifice", "of Arcane Stability", "of Veiled Intent",
     
     # --- Action & Impact ---
     "of the Victor", "of the Fallen", "of the Challenger", 
     "of the Protector", "of the Warlord", "of the Warden", 
-    "of the Exile", "of the Renegade"
+    "of the Exile", "of the Renegade",
+    "of the Relentless", "of the Unbound", "of the Justiciar", 
+    "of the Blighted", "of the Unseen", "of the Swift"
 ]
 WEAPON_NOUNS = {
     # --- 0: One-Handed Axes ---
