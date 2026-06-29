@@ -38,6 +38,29 @@ except Exception as e:
     print("❌ Critical Error: Model components failed to load. Run train_brain.py first.")
     exit()
 
+# -- Load valid RandomProperty / RandomSuffix enchantment template entries -----
+# item_enchantment_template.entry is what goes into item_template.RandomProperty
+# or item_template.RandomSuffix.  We read all DISTINCT entries from the live DB
+# so the generator always picks from entries that actually exist.
+#
+# RandomProperty: items below level 20 -- prefix names ("of the Bear" etc.),
+#                 flat bonuses from ItemRandomProperties.dbc
+# RandomSuffix:   items level 20+ -- suffix names ("of Stamina" etc.),
+#                 scaled by allocation points via RandomPropertiesPoints.dbc
+#
+# Both columns cannot be non-zero on the same item (AC hard constraint).
+try:
+    _rand_conn   = get_db_connection()
+    _rand_cursor = _rand_conn.cursor()
+    _rand_cursor.execute("SELECT DISTINCT entry FROM item_enchantment_template ORDER BY entry")
+    _ALL_ENCHANT_ENTRIES = [row[0] for row in _rand_cursor.fetchall()]
+    _rand_cursor.close()
+    _rand_conn.close()
+    print(f"  Loaded {len(_ALL_ENCHANT_ENTRIES)} item_enchantment_template entries for RandomProp/Suf.")
+except Exception as _e:
+    print(f"  WARNING: Could not load item_enchantment_template ({_e}). RandomProp/Suf disabled.")
+    _ALL_ENCHANT_ENTRIES = []
+
 # Global budget nerf applied to every generated item after fuzz.
 # 1.0 = no nerf, 0.90 = 10% nerf, 0.85 = 15% nerf, etc.
 GLOBAL_BUDGET_NERF = 0.90
@@ -261,7 +284,8 @@ def export_to_excel_tooltips(internal_memory, filename="generated_items_tooltips
         write_row(f"Item Level {item['ilvl']}", font_left=Font(name="Calibri", size=10, bold=True, color="FFD100"), merge_all=True)
         
         # 3. Binding Text Rule
-        bind_text = "Binds when picked up" if q_code >= 2 else "Binds when equipped"
+        _bonding  = item.get("bonding", 1 if q_code >= 3 else 2)
+        bind_text = "Binds when picked up" if _bonding == 1 else "Binds when equipped"
         write_row(bind_text, font_left=Font(name="Calibri", size=10, color="FFFFFF"), merge_all=True)
         
         # 4. Slot Type vs Equipment Class Split Line
@@ -502,19 +526,157 @@ def get_appropriate_req_level(cursor, ilvl, quality):
 def interpolate_armor(nodes, target_ilvl):
     valid_nodes = [n for n in nodes if n["avg_armor"] > 0]
     if not valid_nodes: return 0.0
-    
-    # ... logic identical to interpolate_local_dps ...
     for n in valid_nodes:
         if n["itemlevel"] == target_ilvl: return n["avg_armor"]
-    
-    low_node = max([n for n in valid_nodes if n["itemlevel"] <= target_ilvl], key=lambda x: x['itemlevel'], default=None)
-    high_node = min([n for n in valid_nodes if n["itemlevel"] >= target_ilvl], key=lambda x: x['itemlevel'], default=None)
-    
+    low_node  = max([n for n in valid_nodes if n["itemlevel"] <= target_ilvl], key=lambda x: x["itemlevel"], default=None)
+    high_node = min([n for n in valid_nodes if n["itemlevel"] >= target_ilvl], key=lambda x: x["itemlevel"], default=None)
     if low_node and high_node and low_node != high_node:
         x0, x1 = low_node["itemlevel"], high_node["itemlevel"]
         t = (target_ilvl - x0) / (x1 - x0)
         return low_node["avg_armor"] + t * (high_node["avg_armor"] - low_node["avg_armor"])
-    return valid_nodes[0]["avg_armor"]
+    # Clamp to nearest endpoint rather than falling back to valid_nodes[0]
+    # (which is the LOWEST ilvl node, not the closest one).
+    # This prevents a shield at ilvl 134 from inheriting ilvl 10 armor values
+    # just because the curve has no data above ilvl 115.
+    if low_node:  return low_node["avg_armor"]
+    if high_node: return high_node["avg_armor"]
+    return valid_nodes[-1]["avg_armor"]
+
+def interpolate_block(nodes, target_ilvl):
+    """Identical structure to interpolate_armor but reads avg_block.
+    Returns 0.0 for non-shields which have no block data in their ilvl_sheet.
+    Same endpoint-clamping fix applied so high-ilvl shields never get ilvl-10 block.
+    """
+    valid_nodes = [n for n in nodes if n.get("avg_block", 0) > 0]
+    if not valid_nodes: return 0.0
+    for n in valid_nodes:
+        if n["itemlevel"] == target_ilvl: return n["avg_block"]
+    low_node  = max([n for n in valid_nodes if n["itemlevel"] <= target_ilvl], key=lambda x: x["itemlevel"], default=None)
+    high_node = min([n for n in valid_nodes if n["itemlevel"] >= target_ilvl], key=lambda x: x["itemlevel"], default=None)
+    if low_node and high_node and low_node != high_node:
+        x0, x1 = low_node["itemlevel"], high_node["itemlevel"]
+        t = (target_ilvl - x0) / (x1 - x0)
+        return low_node["avg_block"] + t * (high_node["avg_block"] - low_node["avg_block"])
+    if low_node:  return low_node["avg_block"]
+    if high_node: return high_node["avg_block"]
+    return valid_nodes[-1]["avg_block"]
+
+
+# ---------------------------------------------------------------------------
+# Cross-quality armor / block scaling
+# ---------------------------------------------------------------------------
+# Problem: when a high-quality (e.g. Epic) item has no reference items at or
+# below the requested ilvl, interpolate_armor/block clamps to the nearest node
+# ABOVE the target, which can be drastically overpowered.
+# Example: ilvl 24 Epic shield -- nearest Epic node is Green Tower at ilvl 41
+# (1507 armor). Clamping to that gives a level-24 shield 3x the correct armor.
+#
+# Solution (applied only when this extrapolation gap is detected):
+#   1. Find the nearest reference point in the Epic curve (the "anchor" ilvl).
+#   2. Look up a lower-quality (Rare → Uncommon) curve at that same anchor ilvl.
+#   3. Compute the ratio: epic_armor_at_anchor / lowerqual_armor_at_anchor.
+#      This is the "quality premium" for that slot at that ilvl.
+#   4. Look up the lower-quality armor at the actual TARGET ilvl (where data
+#      almost always exists because green/blue items are far more numerous).
+#   5. Apply the quality premium to get the estimated epic value.
+#
+# Quality fallback order: 4 (Epic) → 3 (Rare) → 2 (Uncommon)
+# Tolerance for "anchor ilvl" neighbor search: ±5 ilvl.
+# This path is only taken when the target quality sheet has NO node at or
+# below the target ilvl (i.e. the only reference is above the target).
+
+_QUALITY_FALLBACK_ORDER = {4: [3, 2], 3: [2], 2: []}  # qual -> lower quals to try
+_ANCHOR_TOLERANCE = 5   # how many ilvls away the anchor node is allowed to be
+
+
+def _needs_cross_quality_scaling(nodes, field, target_ilvl):
+    """Return True when the only available data is ABOVE target_ilvl."""
+    valid = [n for n in nodes if n.get(field, 0) > 0]
+    if not valid:
+        return False  # no data at all; let the caller handle it
+    has_low = any(n["itemlevel"] <= target_ilvl for n in valid)
+    return not has_low  # True only when every node is strictly above target
+
+
+def _cross_quality_scale(source_dict, cls, subcls, inv_type, qual,
+                         target_ilvl, field, interp_fn):
+    """
+    Apply cross-quality ratio scaling when the requested quality has no
+    reference nodes at or below target_ilvl.  Works for any field:
+    avg_armor, avg_block, avg_budget, avg_dps.
+
+    source_dict  -- the dict to look up lower-quality sheets from
+                    (slot_budget_curves for budget, lookup_database for others)
+    interp_fn    -- the raw interpolation function for this field
+
+    Returns the scaled value, or None if cross-quality path also fails.
+    """
+    own_sheet  = source_dict.get((cls, subcls, inv_type, qual), [])
+    own_valid  = [n for n in own_sheet if n.get(field, 0) > 0]
+    if not own_valid:
+        return None
+
+    # Nearest node in the current quality sheet (will be above target)
+    anchor_node = min(own_valid, key=lambda n: abs(n["itemlevel"] - target_ilvl))
+    anchor_ilvl = anchor_node["itemlevel"]
+    anchor_val  = anchor_node[field]
+
+    for lower_qual in _QUALITY_FALLBACK_ORDER.get(qual, []):
+        lower_sheet = source_dict.get((cls, subcls, inv_type, lower_qual), [])
+        lower_valid = [n for n in lower_sheet if n.get(field, 0) > 0]
+        if not lower_valid:
+            continue
+
+        lq_anchor = min(lower_valid, key=lambda n: abs(n["itemlevel"] - anchor_ilvl))
+        if abs(lq_anchor["itemlevel"] - anchor_ilvl) > _ANCHOR_TOLERANCE:
+            continue
+        lq_anchor_val = lq_anchor[field]
+        if lq_anchor_val <= 0:
+            continue
+
+        ratio = anchor_val / lq_anchor_val
+
+        lq_at_target = interp_fn(lower_sheet, target_ilvl)
+        if lq_at_target <= 0:
+            continue
+
+        return lq_at_target * ratio
+
+    return None
+
+
+def get_scaled_armor(lookup_database, category, quality_code, ilvl, sheet):
+    """
+    Drop-in replacement for interpolate_armor at call sites.
+    Uses cross-quality scaling when the target quality has no lower-ilvl nodes.
+    """
+    cls, subcls, inv_type = category["class"], category["subclass"], category["InventoryType"]
+    if _needs_cross_quality_scaling(sheet, "avg_armor", ilvl):
+        scaled = _cross_quality_scale(
+            lookup_database, cls, subcls, inv_type, quality_code,
+            ilvl, "avg_armor", interpolate_armor
+        )
+        if scaled is not None:
+            return scaled
+    return interpolate_armor(sheet, ilvl)
+
+
+def get_scaled_block(lookup_database, category, quality_code, ilvl, sheet):
+    """
+    Drop-in replacement for interpolate_block at call sites.
+    Uses cross-quality scaling when the target quality has no lower-ilvl nodes.
+    """
+    cls, subcls, inv_type = category["class"], category["subclass"], category["InventoryType"]
+    if _needs_cross_quality_scaling(sheet, "avg_block", ilvl):
+        scaled = _cross_quality_scale(
+            lookup_database, cls, subcls, inv_type, quality_code,
+            ilvl, "avg_block", interpolate_block
+        )
+        if scaled is not None:
+            return scaled
+    return interpolate_block(sheet, ilvl)
+
+
 def get_next_entry_id(cursor):
     cursor.execute("SELECT MAX(entry) FROM item_template WHERE entry >= 91000")
     result = cursor.fetchone()[0]
@@ -654,29 +816,105 @@ def interpolate_macro_budget(cls, subcls, inv_type, qual, target_ilvl):
         t = (target_ilvl - x0) / (x1 - x0)
         return low_node["avg_budget"] + t * (high_node["avg_budget"] - low_node["avg_budget"])
 
+    # Only high_node exists: no reference at or below target_ilvl.
+    # Apply cross-quality ratio scaling instead of clamping to the high node,
+    # which would give a low-ilvl item the budget of a much higher-ilvl item.
+    if low_node is None and high_node is not None:
+        # Build a thin wrapper so _cross_quality_scale can call interp_fn(sheet, ilvl)
+        def _interp_budget(budget_nodes, tgt):
+            # budget_nodes are {itemlevel, avg_budget} dicts from slot_budget_curves
+            vn = [n for n in budget_nodes if n.get("avg_budget", 0) > 0]
+            if not vn: return 0.0
+            for n in vn:
+                if n["itemlevel"] == tgt: return n["avg_budget"]
+            lo = max([n for n in vn if n["itemlevel"] <= tgt], key=lambda x: x["itemlevel"], default=None)
+            hi = min([n for n in vn if n["itemlevel"] >= tgt], key=lambda x: x["itemlevel"], default=None)
+            if lo and hi and lo != hi:
+                t = (tgt - lo["itemlevel"]) / (hi["itemlevel"] - lo["itemlevel"])
+                return lo["avg_budget"] + t * (hi["avg_budget"] - lo["avg_budget"])
+            if lo: return lo["avg_budget"]
+            if hi: return hi["avg_budget"]
+            return vn[-1]["avg_budget"]
+
+        scaled = _cross_quality_scale(
+            slot_budget_curves, cls, subcls, inv_type, qual,
+            target_ilvl, "avg_budget", _interp_budget
+        )
+        if scaled is None:
+            # slot_budget_curves failed; try global_budget_curves as source
+            def _global_source_dict():
+                # Wrap global_budget_curves into the (cls,subcls,inv,qual) key format
+                # so _cross_quality_scale can look up lower qualities
+                wrapped = {}
+                for (it, q), v in global_budget_curves.items():
+                    wrapped[(cls, subcls, it, q)] = v
+                return wrapped
+            scaled = _cross_quality_scale(
+                _global_source_dict(), cls, subcls, inv_type, qual,
+                target_ilvl, "avg_budget", _interp_budget
+            )
+        if scaled is not None:
+            return scaled
+        # Final fallback: clamp to high_node (old behaviour, now last resort)
+        return high_node["avg_budget"]
+
     if low_node is not None: return low_node["avg_budget"]
     return nodes[0]["avg_budget"]
 
-def interpolate_local_dps(nodes, target_ilvl):
+def interpolate_local_dps(nodes, target_ilvl, lookup_database=None,
+                          cls=None, subcls=None, inv_type=None, qual=None):
+    """Interpolate avg_dps for weapons.  When no lower-ilvl node exists and
+    caller supplies lookup_database + slot keys, applies cross-quality scaling
+    rather than clamping to the nearest (too-high) reference node."""
     valid_nodes = [n for n in nodes if n["avg_dps"] > 0]
     if not valid_nodes: return 0.0
     for n in valid_nodes:
         if n["itemlevel"] == target_ilvl: return n["avg_dps"]
     if len(valid_nodes) == 1: return valid_nodes[0]["avg_dps"]
-    low_node, high_node = None, None
-    for n in valid_nodes:
-        if n["itemlevel"] < target_ilvl: low_node = n
-        if n["itemlevel"] > target_ilvl and high_node is None: high_node = n
-    if low_node is not None and high_node is not None:
-        x0, x1 = low_node["itemlevel"], high_node["itemlevel"]
-        t = (target_ilvl - x0) / (x1 - x0)
+
+    low_node  = max([n for n in valid_nodes if n["itemlevel"] <= target_ilvl], key=lambda x: x["itemlevel"], default=None)
+    high_node = min([n for n in valid_nodes if n["itemlevel"] >= target_ilvl], key=lambda x: x["itemlevel"], default=None)
+
+    if low_node and high_node and low_node != high_node:
+        t = (target_ilvl - low_node["itemlevel"]) / (high_node["itemlevel"] - low_node["itemlevel"])
         return low_node["avg_dps"] + t * (high_node["avg_dps"] - low_node["avg_dps"])
+
+    # No lower node: apply cross-quality scaling if possible
+    if low_node is None and lookup_database is not None and cls is not None:
+        def _interp_dps(dps_nodes, tgt):
+            vn = [n for n in dps_nodes if n.get("avg_dps", 0) > 0]
+            if not vn: return 0.0
+            for n in vn:
+                if n["itemlevel"] == tgt: return n["avg_dps"]
+            lo = max([n for n in vn if n["itemlevel"] <= tgt], key=lambda x: x["itemlevel"], default=None)
+            hi = min([n for n in vn if n["itemlevel"] >= tgt], key=lambda x: x["itemlevel"], default=None)
+            if lo and hi and lo != hi:
+                t = (tgt - lo["itemlevel"]) / (hi["itemlevel"] - lo["itemlevel"])
+                return lo["avg_dps"] + t * (hi["avg_dps"] - lo["avg_dps"])
+            if lo: return lo["avg_dps"]
+            if hi: return hi["avg_dps"]
+            return vn[-1]["avg_dps"]
+
+        scaled = _cross_quality_scale(
+            lookup_database, cls, subcls, inv_type, qual,
+            target_ilvl, "avg_dps", _interp_dps
+        )
+        if scaled is not None:
+            return scaled
+
+    if low_node:  return low_node["avg_dps"]
+    if high_node: return high_node["avg_dps"]
     return valid_nodes[0]["avg_dps"]
 
 def get_interpolated_properties(ilvl_sheet, target_ilvl, cls, subcls, inv_type, qual):
     if not ilvl_sheet: return None
     final_budget = interpolate_macro_budget(cls, subcls, inv_type, qual, target_ilvl)
-    final_dps = interpolate_local_dps(ilvl_sheet, target_ilvl)
+    # Pass slot keys so interpolate_local_dps can apply cross-quality DPS scaling
+    final_dps = interpolate_local_dps(
+        ilvl_sheet, target_ilvl,
+        lookup_database=lookup_database,
+        cls=cls, subcls=subcls, inv_type=inv_type, qual=qual
+    )
     closest_node = min(ilvl_sheet, key=lambda x: abs(x["itemlevel"] - target_ilvl))
     return {
         "itemlevel": target_ilvl, "avg_budget": final_budget, "avg_dps": final_dps,
@@ -979,6 +1217,37 @@ def run_mass_creation():
             lambda x: int(x) if density_range_min <= int(x) <= 6 else int("err")
         )
 
+    # ── Item Binding ─────────────────────────────────────────────────────────
+    print("\nItem Binding:")
+    print("  [1] Bind on Equip (BoE)")
+    print("  [2] Bind on Pickup (BoP)")
+    print("  [3] Both (mixed)")
+    bonding_mode = get_input("Choice: ", lambda x: int(x) if int(x) in [1, 2, 3] else int("err"))
+    boe_ratio = 0.5
+    if bonding_mode == 3:
+        boe_ratio = get_input(
+            "Proportion of BoE items (0.0 = all BoP, 1.0 = all BoE): ",
+            lambda x: float(x) if 0.0 <= float(x) <= 1.0 else float("err")
+        )
+
+    # ── Random Enchantment ────────────────────────────────────────────────────
+    print("\nRandom Enchantment (RandomProperty / RandomSuffix):")
+    print("  Items below level 20 use RandomProperty (prefix names like 'of the Bear').")
+    print("  Items level 20+    use RandomSuffix   (suffix names, stat-point-scaled).")
+    print("  [1] No random enchantments")
+    print("  [2] Yes -- choose percentage of items to receive one")
+    rand_mode = get_input("Choice: ", lambda x: int(x) if int(x) in [1, 2] else int("err"))
+    rand_pct  = 0.0
+    if rand_mode == 2:
+        if not _ALL_ENCHANT_ENTRIES:
+            print("  WARNING: No item_enchantment_template entries found. Disabling.")
+            rand_mode = 1
+        else:
+            rand_pct = get_input(
+                "Percentage of items to receive a random enchantment (0-100): ",
+                lambda x: float(x) if 0.0 <= float(x) <= 100.0 else float("err")
+            ) / 100.0
+
     # ── Item Count ───────────────────────────────────────────────────────────
     print("\nNote: Each item is ~3.6 KB in memory.")
     print("  Practical safe ceiling: ~400,000 items before RAM pressure.")
@@ -1068,7 +1337,7 @@ def run_mass_creation():
         else:
             db_stats_count = 2
 
-        final_budget = int(final_budget * GLOBAL_BUDGET_NERF)
+        final_budget = max(1, int(final_budget * GLOBAL_BUDGET_NERF))
 
         if density_mode == 1:
             num_stats_to_roll = db_stats_count if db_stats_count > 0 else 2
@@ -1088,6 +1357,15 @@ def run_mass_creation():
         if num_stats_to_roll > 0:
             # ── Blueprint auto-selection (no prompts) ─────────────────────
             item_blueprint_key = get_mass_blueprint(category)
+
+            # Mail STR_TANK stops being relevant at level 40 when plate unlocks.
+            # Reroll the item so the target count is always met.
+            if (item_blueprint_key == "STR_TANK"
+                    and category["class"] == 4
+                    and category["subclass"] == 3
+                    and ilvl > 40):
+                continue
+
             blueprint = BLUEPRINTS.get(item_blueprint_key)
 
             if blueprint:
@@ -1174,9 +1452,21 @@ def run_mass_creation():
         if category['InventoryType'] in (2, 11, 23):  # Neck, Ring, Off-hand frill
             avg_armor  = 0.0
         else:
-            avg_armor  = interpolate_armor(sheet, ilvl) if category['class'] == 4 else 0.0
+            avg_armor  = get_scaled_armor(lookup_database, category, quality_code, ilvl, sheet) if category['class'] == 4 else 0.0
         fuzz_factor2   = random.uniform(1.0 - variance, 1.0 + variance)
         final_armor    = int(avg_armor * fuzz_factor2) if avg_armor > 0 else 0
+        final_block    = max(1, int(get_scaled_block(lookup_database, category, quality_code, ilvl, sheet) * fuzz_factor2)) if category['InventoryType'] == 14 else 0
+        if bonding_mode == 1:   item_bonding = 2
+        elif bonding_mode == 2: item_bonding = 1
+        else:                   item_bonding = 2 if random.random() < boe_ratio else 1
+        item_rand_prop = 0
+        item_rand_suf  = 0
+        if rand_mode == 2 and _ALL_ENCHANT_ENTRIES and random.random() < rand_pct:
+            ench_entry = random.choice(_ALL_ENCHANT_ENTRIES)
+            if ilvl < 20:
+                item_rand_prop = ench_entry
+            else:
+                item_rand_suf  = ench_entry
 
         base_sell_price  = calculate_item_sell_price(lookup_database, category, quality_code, ilvl)
         final_sell_price = int(base_sell_price * fuzz_factor2)
@@ -1187,9 +1477,12 @@ def run_mass_creation():
             "display_source": display_obj,
             "dmg_min": dmg_min, "dmg_max": dmg_max,
             "delay": dynamic_delay, "dps": final_dps,
-            "armor": final_armor, "stats": stats, "budget": final_budget,
+            "armor": final_armor, "block": final_block,
+            "stats": stats, "budget": final_budget,
             "required_level": req_level, "Material": item_material,
-            "sheath": item_sheath, "sell_price": final_sell_price
+            "sheath": item_sheath, "sell_price": final_sell_price,
+            "bonding": item_bonding,
+            "rand_prop": item_rand_prop, "rand_suf": item_rand_suf
         })
         generated += 1
 
@@ -1204,6 +1497,321 @@ def run_mass_creation():
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+
+
+# =============================================================================
+# LOOT ASSIGNMENT ENGINE
+# Reads existing creature_loot_template and reference_loot_template, then
+# assigns every item in internal_memory to level-appropriate mobs.
+#
+# Open-world mobs   -> direct rows in creature_loot_template (independent roll)
+# Dungeon/raid boss -> rows inserted into the boss's existing reference group
+#                      in reference_loot_template so the new item competes with
+#                      existing drops in the same roll pool rather than getting
+#                      a free separate roll.
+# =============================================================================
+
+def run_loot_assignment():
+    if not internal_memory:
+        print("\n  No items in memory. Generate some items first.")
+        return
+
+    print("\n" + "="*57)
+    print("  LOOT ASSIGNMENT ENGINE")
+    print("="*57)
+
+    # -- Configuration ---------------------------------------------------------
+    print("\nDrop chances (press Enter to keep default):")
+
+    def _pct(prompt, default):
+        raw = input(f"  {prompt} [{default}%]: ").strip()
+        if raw == "":
+            return default
+        try:
+            v = float(raw)
+            if 0 < v <= 100:
+                return v
+        except ValueError:
+            pass
+        print(f"  Invalid value, using {default}%")
+        return default
+
+    chance_green  = _pct("Green  (Uncommon)", 10.0)
+    chance_blue   = _pct("Blue   (Rare)",      5.0)
+    chance_purple = _pct("Purple (Epic)",       1.0)
+    CHANCE_MAP    = {2: chance_green, 3: chance_blue, 4: chance_purple}
+
+    print("\nMob scope:")
+    print("  [1] Open-world mobs only")
+    print("  [2] Dungeon / raid bosses only")
+    print("  [3] Both")
+    scope = get_input("Choice: ",
+        lambda x: int(x) if x in ["1", "2", "3"] else int("err"))
+    include_openworld = scope in (1, 3)
+    include_instances = scope in (2, 3)
+
+    raw_tol = input("  iLvl tolerance for boss matching [10]: ").strip()
+    try:
+        ilvl_tol = int(raw_tol) if raw_tol else 10
+        if ilvl_tol <= 0:
+            ilvl_tol = 10
+    except ValueError:
+        ilvl_tol = 10
+
+    # -- Re-open a fresh DB connection ----------------------------------------
+    # The main cursor may have been closed after generation.
+    print("\n -> Connecting to database...")
+    try:
+        loot_conn   = mysql.connector.connect(**db_config)
+        loot_cursor = loot_conn.cursor(dictionary=True)
+    except Exception as e:
+        print(f"  ERROR: Could not connect to database: {e}")
+        return
+
+    # -- Classify maps: open-world vs instanced --------------------------------
+    # Maps 0 (Eastern Kingdoms) and 1 (Kalimdor) are the open world.
+    # Everything else that appears in the creature spawn table is an instance.
+    # We try map_dbc first for authoritative map_type data:
+    #   0 = World, 1 = Instance, 2 = Raid, 3 = Battleground, 4 = Arena
+    print(" -> Classifying maps...")
+    try:
+        loot_cursor.execute("SELECT DISTINCT map FROM creature")
+        all_maps = {row["map"] for row in loot_cursor.fetchall()}
+
+        try:
+            loot_cursor.execute("SELECT entry, map_type FROM map_dbc")
+            map_types     = {r["entry"]: r["map_type"] for r in loot_cursor.fetchall()}
+            instance_maps = {m for m in all_maps if map_types.get(m, 0) in (1, 2)}
+        except Exception:
+            # Fallback: treat everything except 0 and 1 as instanced
+            instance_maps = all_maps - {0, 1}
+
+        openworld_maps = all_maps - instance_maps
+    except Exception as e:
+        print(f"  WARNING: Map classification failed ({e}). Defaulting to ID heuristic.")
+        instance_maps  = set()
+        openworld_maps = {0, 1}
+
+    # -- Load creature templates -----------------------------------------------
+    # One row per template; maps aggregated with GROUP_CONCAT.
+    print(" -> Loading creature templates...")
+    loot_cursor.execute("""
+        SELECT
+            ct.entry,
+            ct.name,
+            ct.minlevel,
+            ct.maxlevel,
+            ct.lootid,
+            ct.rank,
+            GROUP_CONCAT(DISTINCT c.map) AS maps
+        FROM creature_template ct
+        JOIN creature c ON c.id1 = ct.entry
+        WHERE ct.lootid != 0
+          AND ct.minlevel > 0
+        GROUP BY ct.entry
+    """)
+    all_creatures = loot_cursor.fetchall()
+
+    openworld_creatures = []
+    boss_creatures      = []
+
+    for row in all_creatures:
+        maps        = set(int(m) for m in (row["maps"] or "").split(",") if m.strip())
+        in_instance = bool(maps & instance_maps)
+        in_openworld = bool(maps & openworld_maps)
+        is_boss     = int(row["rank"]) in (3, 4)   # Boss / Rare-Elite
+
+        if include_instances and in_instance and is_boss:
+            boss_creatures.append(row)
+        if include_openworld and in_openworld and not is_boss:
+            openworld_creatures.append(row)
+
+    print(f"    Open-world mobs found   : {len(openworld_creatures):,}")
+    print(f"    Dungeon/raid bosses found: {len(boss_creatures):,}")
+
+    # -- Analyse boss reference loot tables ------------------------------------
+    # For each boss we find rows in creature_loot_template where Reference != 0.
+    # Those Reference values point to reference_loot_template entries.
+    # We compute the average ilvl of real items in each reference group so we
+    # can match generated items to the closest-ilvl group.
+    #
+    # Critically: we filter out rlt.Reference != 0 rows because AzerothCore has
+    # a known bug where reference-of-reference entries inside a group are silently
+    # skipped by the loot engine -- inserting there would have no effect.
+    print(" -> Analysing boss reference loot tables...")
+
+    boss_lootids = {int(row["lootid"]) for row in boss_creatures}
+    lootid_to_refs = {}   # lootid -> [{ref_entry, group_id, avg_ilvl}]
+
+    if boss_lootids:
+        ids_str = ",".join(str(x) for x in boss_lootids)
+        loot_cursor.execute(f"""
+            SELECT
+                clt.Entry      AS loot_id,
+                clt.Reference  AS ref_entry,
+                clt.GroupId    AS group_id,
+                AVG(it.ItemLevel) AS avg_ilvl,
+                COUNT(rlt.Item)   AS item_count
+            FROM creature_loot_template clt
+            JOIN reference_loot_template rlt ON rlt.Entry = clt.Reference
+            JOIN item_template it ON it.entry = rlt.Item
+            WHERE clt.Entry IN ({ids_str})
+              AND clt.Reference != 0
+              AND rlt.Reference = 0
+              AND rlt.Item != 0
+            GROUP BY clt.Entry, clt.Reference, clt.GroupId
+        """)
+        for row in loot_cursor.fetchall():
+            lid = int(row["loot_id"])
+            if lid not in lootid_to_refs:
+                lootid_to_refs[lid] = []
+            lootid_to_refs[lid].append({
+                "ref_entry": int(row["ref_entry"]),
+                "group_id":  int(row["group_id"]),
+                "avg_ilvl":  float(row["avg_ilvl"] or 0),
+            })
+
+    # -- Collect items already assigned to avoid duplicates --------------------
+    print(" -> Checking for existing loot assignments...")
+    assigned_item_ids = set()
+    try:
+        loot_cursor.execute(
+            "SELECT DISTINCT Item FROM creature_loot_template WHERE Item > 0")
+        assigned_item_ids.update(r["Item"] for r in loot_cursor.fetchall())
+        loot_cursor.execute(
+            "SELECT DISTINCT Item FROM reference_loot_template WHERE Item > 0")
+        assigned_item_ids.update(r["Item"] for r in loot_cursor.fetchall())
+    except Exception as e:
+        print(f"  WARNING: Could not load existing assignments ({e}).")
+
+    # The item entry IDs we generated start at start_entry_id (same as SQL output)
+    start_id = get_next_entry_id(cursor)
+
+    # -- Index open-world creatures by level for fast lookup ------------------
+    ow_by_level = {}   # level -> [lootid, ...]  (deduped per level)
+    for row in openworld_creatures:
+        for lvl in range(int(row["minlevel"]), int(row["maxlevel"]) + 1):
+            ow_by_level.setdefault(lvl, set()).add(int(row["lootid"]))
+
+    # -- Build assignment plan -------------------------------------------------
+    print(" -> Planning assignments...")
+
+    openworld_inserts = []   # (loot_entry, item_id, chance, comment)
+    reference_inserts = []   # (ref_entry, item_id, group_id, chance, comment)
+    unassigned        = []   # (item_id, name, ilvl)
+
+    for idx, item in enumerate(internal_memory):
+        item_id      = start_id + idx
+        item_ilvl    = int(item["ilvl"])
+        item_quality = int(item["quality"])
+        item_name    = item["name"]
+        item_chance  = CHANCE_MAP.get(item_quality, 5.0)
+
+        if item_id in assigned_item_ids:
+            continue
+
+        assigned = False
+
+        # Open-world: find mobs whose level range overlaps [req_lvl, req_lvl+10]
+        if include_openworld:
+            req_lvl  = int(item.get("required_level", max(1, item_ilvl - 5)))
+            hit_lootids = set()
+            for lvl in range(req_lvl, req_lvl + 11):
+                hit_lootids.update(ow_by_level.get(lvl, set()))
+            for loot_entry in hit_lootids:
+                openworld_inserts.append((
+                    loot_entry, item_id, item_chance,
+                    f"{item_name} iLvl{item_ilvl} (generated)"
+                ))
+            if hit_lootids:
+                assigned = True
+
+        # Boss: find the reference group whose avg_ilvl is closest to item_ilvl
+        # within tolerance. Prefer the single best match per item to avoid
+        # flooding every boss with every item -- one boss per generated item.
+        if include_instances:
+            best_ref   = None
+            best_delta = float("inf")
+            for boss_row in boss_creatures:
+                lootid = int(boss_row["lootid"])
+                for ref in lootid_to_refs.get(lootid, []):
+                    delta = abs(ref["avg_ilvl"] - item_ilvl)
+                    if delta <= ilvl_tol and delta < best_delta:
+                        best_delta = delta
+                        best_ref   = ref
+
+            if best_ref:
+                reference_inserts.append((
+                    best_ref["ref_entry"],
+                    item_id,
+                    best_ref["group_id"],
+                    item_chance,
+                    f"{item_name} iLvl{item_ilvl} (generated)"
+                ))
+                assigned = True
+
+        if not assigned:
+            unassigned.append((item_id, item_name, item_ilvl))
+
+    # -- Write loot_assignments.sql --------------------------------------------
+    loot_filename = "loot_assignments.sql"
+    print(f"\n -> Writing {loot_filename}...")
+
+    with open(loot_filename, "w", encoding="utf-8") as f:
+        f.write("-- ===========================================================\n")
+        f.write("-- AzerothCore Loot Assignments -- generated by Item Generator\n")
+        f.write(f"-- Open-world rows : {len(openworld_inserts):,}\n")
+        f.write(f"-- Reference rows  : {len(reference_inserts):,}\n")
+        f.write(f"-- Unassigned items: {len(unassigned):,}\n")
+        f.write("-- ===========================================================\n\n")
+
+        if openworld_inserts:
+            f.write("-- Open-world mob loot (direct creature_loot_template rows)\n")
+            f.write("-- GroupId=0: each item rolls independently.\n\n")
+            for (loot_entry, item_id, chance, comment) in openworld_inserts:
+                f.write(
+                    f"INSERT IGNORE INTO `creature_loot_template` "
+                    f"(`Entry`,`Item`,`Reference`,`Chance`,`QuestRequired`,"
+                    f"`LootMode`,`GroupId`,`MinCount`,`MaxCount`,`Comment`) "
+                    f"VALUES ({loot_entry},{item_id},0,{chance},0,1,0,1,1,"
+                    f"'{comment}');\n"
+                )
+            f.write("\n")
+
+        if reference_inserts:
+            f.write("-- Dungeon/raid boss loot (reference_loot_template rows)\n")
+            f.write("-- Inserted into boss's existing reference group so the item\n")
+            f.write("-- competes with existing drops in the same roll pool.\n\n")
+            for (ref_entry, item_id, group_id, chance, comment) in reference_inserts:
+                f.write(
+                    f"INSERT IGNORE INTO `reference_loot_template` "
+                    f"(`Entry`,`Item`,`Reference`,`Chance`,`QuestRequired`,"
+                    f"`LootMode`,`GroupId`,`MinCount`,`MaxCount`,`Comment`) "
+                    f"VALUES ({ref_entry},{item_id},0,{chance},0,1,{group_id},1,1,"
+                    f"'{comment}');\n"
+                )
+            f.write("\n")
+
+        if unassigned:
+            f.write("-- WARNING: items below could not be matched to any mob.\n")
+            f.write("-- Possible causes: ilvl outside range of available mobs,\n")
+            f.write("-- no boss reference groups within tolerance, or item already\n")
+            f.write("-- assigned from a previous run.\n")
+            for (item_id, name, ilvl) in unassigned:
+                f.write(f"--   entry {item_id}: {name} (iLvl {ilvl})\n")
+
+    loot_cursor.close()
+    loot_conn.close()
+
+    # -- Summary ---------------------------------------------------------------
+    print(f"\n  Open-world assignments  : {len(openworld_inserts):>6,}")
+    print(f"  Reference  assignments  : {len(reference_inserts):>6,}")
+    if unassigned:
+        print(f"  Unassigned items        : {len(unassigned):>6,}  "
+              f"(listed as comments in {loot_filename})")
+    print(f"\n  Saved -> {loot_filename}")
+
+
 while True:
     print("\n--- NEW ITEM GENERATION BATCH ---")
 
@@ -1213,11 +1821,18 @@ while True:
     print("  [2] Armor")
     print("  [3] All of the above (random per item)")
     print("  [4] ⚡ Mass Creation (auto-populate, no archetype prompts)")
-    group_choice = get_input("Choice: ", lambda x: int(x) if x in ['1', '2', '3', '4'] else int("err"))
+    print("  [5] 🎯 Assign Loot to Mobs (uses items already in memory)")
+    group_choice = get_input("Choice: ", lambda x: int(x) if x in ['1', '2', '3', '4', '5'] else int("err"))
 
     if group_choice == 4:
         run_mass_creation()
         if get_input("\nAdd another batch? (y/n): ", lambda x: x.lower() if x.lower() in ['y', 'n'] else int("err")) == 'n':
+            break
+        continue
+
+    if group_choice == 5:
+        run_loot_assignment()
+        if get_input("\nReturn to menu? (y/n): ", lambda x: x.lower() if x.lower() in ['y', 'n'] else int("err")) == 'n':
             break
         continue
 
@@ -1342,6 +1957,35 @@ while True:
             lambda x: int(x) if density_range_min <= int(x) <= 6 else int("err")
         )
 
+    print("\nItem Binding:")
+    print("  [1] Bind on Equip (BoE)")
+    print("  [2] Bind on Pickup (BoP)")
+    print("  [3] Both (mixed)")
+    bonding_mode = get_input("Choice: ", lambda x: int(x) if int(x) in [1, 2, 3] else int("err"))
+    boe_ratio = 0.5
+    if bonding_mode == 3:
+        boe_ratio = get_input(
+            "Proportion of BoE items (0.0 = all BoP, 1.0 = all BoE): ",
+            lambda x: float(x) if 0.0 <= float(x) <= 1.0 else float("err")
+        )
+
+    print("\nRandom Enchantment (RandomProperty / RandomSuffix):")
+    print("  Items below level 20 use RandomProperty (prefix names like 'of the Bear').")
+    print("  Items level 20+    use RandomSuffix   (suffix names, stat-point-scaled).")
+    print("  [1] No random enchantments")
+    print("  [2] Yes -- choose percentage of items to receive one")
+    rand_mode = get_input("Choice: ", lambda x: int(x) if int(x) in [1, 2] else int("err"))
+    rand_pct  = 0.0
+    if rand_mode == 2:
+        if not _ALL_ENCHANT_ENTRIES:
+            print("  WARNING: No item_enchantment_template entries found. Disabling.")
+            rand_mode = 1
+        else:
+            rand_pct = get_input(
+                "Percentage of items to receive a random enchantment (0-100): ",
+                lambda x: float(x) if 0.0 <= float(x) <= 100.0 else float("err")
+            ) / 100.0
+
     quantity = get_input("\nHow many items?: ", lambda x: int(x) if int(x) > 0 else int("err"))
 
     available_levels = list(range(ilvl_range[0], ilvl_range[1] + 1))
@@ -1414,7 +2058,7 @@ while True:
         else:
             db_stats_count = 2
 
-        final_budget = int(final_budget * GLOBAL_BUDGET_NERF)
+        final_budget = max(1, int(final_budget * GLOBAL_BUDGET_NERF))
 
         if density_mode == 1:
             num_stats_to_roll = db_stats_count if db_stats_count > 0 else 2
@@ -1514,19 +2158,36 @@ while True:
         predicted_display_id = display_obj["id"]
         req_level = get_appropriate_req_level(cursor, ilvl, quality_code)
         if category['InventoryType'] in (2, 11, 23): avg_armor = 0.0  # Neck, Ring, Off-hand frill
-        else: avg_armor = interpolate_armor(sheet, ilvl) if category['class'] == 4 else 0.0
+        else: avg_armor = get_scaled_armor(lookup_database, category, quality_code, ilvl, sheet) if category['class'] == 4 else 0.0
         fuzz_factor = random.uniform(1.0 - variance, 1.0 + variance)
         final_armor = int(avg_armor * fuzz_factor) if avg_armor > 0 else 0
+        final_block = max(1, int(get_scaled_block(lookup_database, category, quality_code, ilvl, sheet) * fuzz_factor)) if category['InventoryType'] == 14 else 0
+        if bonding_mode == 1:   item_bonding = 2
+        elif bonding_mode == 2: item_bonding = 1
+        else:                   item_bonding = 2 if random.random() < boe_ratio else 1
+        item_rand_prop = 0
+        item_rand_suf  = 0
+        if rand_mode == 2 and _ALL_ENCHANT_ENTRIES and random.random() < rand_pct:
+            ench_entry = random.choice(_ALL_ENCHANT_ENTRIES)
+            if ilvl < 20:
+                item_rand_prop = ench_entry
+            else:
+                item_rand_suf  = ench_entry
         base_sell_price = calculate_item_sell_price(lookup_database, category, quality_code, ilvl)
         final_sell_price = int(base_sell_price * fuzz_factor)
-        
+
         internal_memory.append({
-    "config": category, "quality": quality_code, "ilvl": ilvl, "name": generated_name,
-    "displayid": predicted_display_id, "dmg_min": dmg_min, "dmg_max": dmg_max, "displayid": display_obj.get("id"), "display_source": display_obj, "delay": dynamic_delay,
-    "dps": final_dps, "armor": final_armor, # <--- ARMOR IS HERE, 
-    "stats": stats, "budget": final_budget, "required_level": req_level, "Material": item_material,
-    "sheath": item_sheath, "sell_price": final_sell_price
-})
+            "config": category, "quality": quality_code, "ilvl": ilvl,
+            "name": generated_name, "displayid": display_obj.get("id"),
+            "display_source": display_obj, "delay": dynamic_delay,
+            "dmg_min": dmg_min, "dmg_max": dmg_max, "dps": final_dps,
+            "armor": final_armor, "block": final_block,
+            "stats": stats, "budget": final_budget,
+            "required_level": req_level, "Material": item_material,
+            "sheath": item_sheath, "sell_price": final_sell_price,
+            "bonding": item_bonding,
+            "rand_prop": item_rand_prop, "rand_suf": item_rand_suf
+        })
 
     print(f"Saved {quantity} items. Total cached: {len(internal_memory)}")
     if get_input("\nAdd another batch? (y/n): ", lambda x: x.lower() if x.lower() in ['y', 'n'] else int("err")) == 'n': break
@@ -1549,8 +2210,8 @@ with open(output_filename, "w") as f:
         # The name in internal_memory is unchanged; only the SQL output escapes it.
         sql_name = item['name'].replace("'", "''")
         sql_string = f"""DELETE FROM `item_template` WHERE `entry` = {current_id};
-INSERT INTO `item_template` (`entry`, `class`, `subclass`, `name`, `displayid`, `Quality`, `InventoryType`, `itemlevel`, `RequiredLevel`, `armor`, `delay`, `dmg_min1`, `dmg_max1`, `dmg_type1`, `stat_type1`, `stat_value1`, `stat_type2`, `stat_value2`, `stat_type3`, `stat_value3`, `stat_type4`, `stat_value4`, `stat_type5`, `stat_value5`, `stat_type6`, `stat_value6`, `Material`, `sheath`, `SellPrice`, `Description`) 
-VALUES ({current_id}, {c['class']}, {c['subclass']}, '{sql_name}', {item['displayid']}, {item['quality']}, {c['InventoryType']}, {item['ilvl']}, {item['required_level']}, {item.get('armor', 0)}, {item['delay']}, {item['dmg_min']}, {item['dmg_max']}, {c['dmg_type1']}, {s['stat_type1']}, {s['stat_value1']}, {s['stat_type2']}, {s['stat_value2']}, {s['stat_type3']}, {s['stat_value3']}, {s['stat_type4']}, {s['stat_value4']}, {s['stat_type5']}, {s['stat_value5']}, {s['stat_type6']}, {s['stat_value6']}, {item['Material']}, {item['sheath']}, {item.get('sell_price', 0)},  '{description}');\n"""
+INSERT INTO `item_template` (`entry`, `class`, `subclass`, `name`, `displayid`, `Quality`, `InventoryType`, `itemlevel`, `RequiredLevel`, `armor`, `block`, `bonding`, `RandomProperty`, `RandomSuffix`, `delay`, `dmg_min1`, `dmg_max1`, `dmg_type1`, `stat_type1`, `stat_value1`, `stat_type2`, `stat_value2`, `stat_type3`, `stat_value3`, `stat_type4`, `stat_value4`, `stat_type5`, `stat_value5`, `stat_type6`, `stat_value6`, `Material`, `sheath`, `SellPrice`, `Description`) 
+VALUES ({current_id}, {c['class']}, {c['subclass']}, '{sql_name}', {item['displayid']}, {item['quality']}, {c['InventoryType']}, {item['ilvl']}, {item['required_level']}, {item.get('armor', 0)}, {item.get('block', 0)}, {item.get('bonding', 1)}, {item.get('rand_prop', 0)}, {item.get('rand_suf', 0)}, {item['delay']}, {item['dmg_min']}, {item['dmg_max']}, {c['dmg_type1']}, {s['stat_type1']}, {s['stat_value1']}, {s['stat_type2']}, {s['stat_value2']}, {s['stat_type3']}, {s['stat_value3']}, {s['stat_type4']}, {s['stat_value4']}, {s['stat_type5']}, {s['stat_value5']}, {s['stat_type6']}, {s['stat_value6']}, {item['Material']}, {item['sheath']}, {item.get('sell_price', 0)}, '{description}');\n"""
         f.write(sql_string)
         
         combat_info = f" ({item['dps']} DPS | Min-Max: {item['dmg_min']}-{item['dmg_max']})" if c['class'] == 2 else " (Armor Piece)"
