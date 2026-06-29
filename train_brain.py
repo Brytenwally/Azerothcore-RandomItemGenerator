@@ -473,12 +473,15 @@ MATERIAL_WHITELIST = [
 
     # --- Other Crafting Materials ---
     "Bone", "Wood", "Oak", "Ash", "Ivory", "Marble", "Granite"
+    
+]
+PROPERTY_WHITELIST = [
+    # --- Ominous & Dark ---
     "of Grievance", "of Massacre", "of the Scourge", "of Crimson Agony", 
     "of Ebon Depths", "of the Void", "of Lost Souls", "of the Grave", 
     "of Eternal Night", "of Ruin", "of Despair", "of Sinister Light",
     "of Endless Grief", "of Silent Screams", "of Rotting Vigor", 
     "of the Abyssal Maw", "of Dark Whispers", "of the Plague",
-
     # --- Elemental & Nature ---
     "of the Frozen Wastes", "of Eternal Storms", "of the Molten Core", 
     "of the Kirin Tor", "of the Silver Hand", "of the Ebon Blade", 
