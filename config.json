@@ -1,0 +1,12 @@
+{
+  "database": {
+    "host": "127.0.0.1",
+    "port": 3306,
+    "user": "acore",
+    "password": "acore",
+    "database": "acore_world"
+  },
+  "entry_id_start": 91000,
+  "brain_file": "blizzlike_master_brain.pkl",
+  "material_library_file": "material_library.joblib"
+}
