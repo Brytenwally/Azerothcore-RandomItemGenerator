@@ -1,31 +1,75 @@
 import joblib
 import random
 import os
+import json
 import warnings
 import mysql.connector
 import csv
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
-material_library = joblib.load('material_library.joblib')
-warnings.filterwarnings("ignore")
+
+# -- Load external config (config.json, same folder as this script) ----------
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+
+DEFAULT_CONFIG = {
+    "database": {
+        "host": "127.0.0.1",
+        "port": 3306,
+        "user": "acore",
+        "password": "acore",
+        "database": "acore_world"
+    },
+    "entry_id_start": 91000,
+    "brain_file": "blizzlike_master_brain.pkl",
+    "material_library_file": "material_library.joblib"
+}
+
+def load_config(path):
+    if not os.path.exists(path):
+        print(f"⚠️  No config.json found at {path}.")
+        print("    Creating one with default values -- edit it with your DB credentials and rerun.")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(DEFAULT_CONFIG, f, indent=2)
+        print(f"    Wrote default config to {path}")
+        exit()
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+    except Exception as e:
+        print(f"❌ Failed to parse {path}: {e}")
+        exit()
+    # Fill in any missing keys with defaults so partial configs still work
+    for key, val in DEFAULT_CONFIG.items():
+        if key not in cfg:
+            cfg[key] = val
+    for key, val in DEFAULT_CONFIG["database"].items():
+        cfg["database"].setdefault(key, val)
+    return cfg
+
+CONFIG = load_config(CONFIG_PATH)
 
 DB_CONFIG = {
-    'user': 'acore', 'password': 'acore',
-    'host': '127.0.0.1', 'database': 'acore_world', 'port': 3306
-} 
+    "user": CONFIG["database"]["user"],
+    "password": CONFIG["database"]["password"],
+    "host": CONFIG["database"]["host"],
+    "database": CONFIG["database"]["database"],
+    "port": CONFIG["database"]["port"]
+}
+ENTRY_ID_START = CONFIG["entry_id_start"]
+
+material_library = joblib.load(CONFIG["material_library_file"])
+warnings.filterwarnings("ignore")
+
 try:
-    conn = mysql.connector.connect(
-        user='acore', password='acore', 
-        host='127.0.0.1', database='acore_world', port=3306
-    )
+    conn = mysql.connector.connect(**DB_CONFIG)
     cursor = conn.cursor()
-    print("✅ Connected to acore_world database.")
+    print(f"✅ Connected to {DB_CONFIG['database']} database ({DB_CONFIG['host']}:{DB_CONFIG['port']}).")
 except Exception as e:
     print(f"❌ Database connection failed: {e}")
     exit()
 try:
-    master = joblib.load("blizzlike_master_brain.pkl")
+    master = joblib.load(CONFIG["brain_file"])
     lookup_database = master["lookup_database"]
     slot_budget_curves  = master.get("slot_budget_curves", {})
     global_budget_curves = master["global_budget_curves"]
@@ -678,9 +722,9 @@ def get_scaled_block(lookup_database, category, quality_code, ilvl, sheet):
 
 
 def get_next_entry_id(cursor):
-    cursor.execute("SELECT MAX(entry) FROM item_template WHERE entry >= 91000")
+    cursor.execute(f"SELECT MAX(entry) FROM item_template WHERE entry >= {ENTRY_ID_START}")
     result = cursor.fetchone()[0]
-    return (result + 1) if result else 91000
+    return (result + 1) if result else ENTRY_ID_START
 def generate_item_name(category_config):
     """
     Pure operational execution function. Uses the global 'master' arrays
@@ -923,6 +967,7 @@ def get_interpolated_properties(ilvl_sheet, target_ilvl, cls, subcls, inv_type, 
     }
 
 internal_memory = []
+generated_itemsets = []  # each: {"id": int, "name": str, "item_indices": [...], "spells": [(threshold, spellid), ...]}
 
 def prompt_blueprint(label, options_map):
     """
@@ -1482,7 +1527,9 @@ def run_mass_creation():
             "required_level": req_level, "Material": item_material,
             "sheath": item_sheath, "sell_price": final_sell_price,
             "bonding": item_bonding,
-            "rand_prop": item_rand_prop, "rand_suf": item_rand_suf
+            "rand_prop": item_rand_prop, "rand_suf": item_rand_suf,
+            "itemset": 0,
+            "spellid": 0, "spelltrigger": 0, "spellcharges": 0, "spellcooldown": -1
         })
         generated += 1
 
@@ -1562,7 +1609,7 @@ def run_loot_assignment():
     # The main cursor may have been closed after generation.
     print("\n -> Connecting to database...")
     try:
-        loot_conn   = mysql.connector.connect(**db_config)
+        loot_conn   = mysql.connector.connect(**DB_CONFIG)
         loot_cursor = loot_conn.cursor(dictionary=True)
     except Exception as e:
         print(f"  ERROR: Could not connect to database: {e}")
@@ -1812,6 +1859,86 @@ def run_loot_assignment():
     print(f"\n  Saved -> {loot_filename}")
 
 
+def run_itemset_creation():
+    """Groups items already sitting in internal_memory into an ItemSet.
+    Tags each member item with item_template.itemset = set_id and records
+    the set's spell bonuses for later ItemSet.dbc CSV export."""
+    if not internal_memory:
+        print("\n  No items in memory. Generate some items first.")
+        return
+
+    print("\n" + "="*57)
+    print("  ITEM SET CREATOR")
+    print("="*57)
+
+    print(f"\n  {len(internal_memory)} item(s) currently in memory:\n")
+    for i, item in enumerate(internal_memory, start=1):
+        c = item["config"]
+        tag = f"  [already in Set {item['itemset']}]" if item.get("itemset") else ""
+        print(f"   [{i:>4}] {item['name']}  (iLvl {item['ilvl']}, Q{item['quality']}, {c['name']}){tag}")
+
+    print("\nEnter the numbers of the items belonging to this set (2-17 items),")
+    print("comma-separated, e.g. '3,7,12':")
+    while True:
+        raw = input("  Items: ").strip()
+        try:
+            picks = sorted(set(int(x.strip()) for x in raw.split(",") if x.strip()))
+        except ValueError:
+            print("  Invalid input. Use comma-separated numbers.")
+            continue
+        if not (2 <= len(picks) <= 17):
+            print("  A set needs between 2 and 17 items.")
+            continue
+        if any(p < 1 or p > len(internal_memory) for p in picks):
+            print("  One or more numbers are out of range.")
+            continue
+        break
+    item_indices = [p - 1 for p in picks]  # zero-based positions into internal_memory
+
+    set_id = get_input(
+        "\nEnter Item Set ID (must be unique -- matches ItemSet.dbc ID and "
+        "item_template.itemset): ",
+        lambda x: int(x) if int(x) > 0 else int("err")
+    )
+    if any(s["id"] == set_id for s in generated_itemsets):
+        print(f"  WARNING: Set ID {set_id} was already used earlier in this session. Aborting.")
+        return
+
+    set_name = input("Enter Set Name (e.g. 'Sorvaxis Battlegear'): ").strip()
+    if not set_name:
+        set_name = f"Unnamed Set {set_id}"
+
+    print(f"\nDefine set bonuses (spell triggered once N of the {len(picks)} items are worn).")
+    print("Up to 8 bonus tiers. Leave Spell ID empty to stop adding bonuses.")
+    spells = []
+    for slot in range(1, 9):
+        raw_spell = input(f"  Bonus {slot} -- Spell ID (Enter to stop): ").strip()
+        if raw_spell == "":
+            break
+        try:
+            spell_id = int(raw_spell)
+        except ValueError:
+            print("  Invalid Spell ID, skipping this slot.")
+            continue
+        threshold = get_input(
+            f"  Bonus {slot} -- Threshold (2-{len(picks)} items required): ",
+            lambda x: int(x) if 2 <= int(x) <= len(picks) else int("err")
+        )
+        spells.append((threshold, spell_id))
+
+    # Tag every selected item with this set's ID (written to item_template.itemset on export)
+    for i in item_indices:
+        internal_memory[i]["itemset"] = set_id
+
+    generated_itemsets.append({
+        "id": set_id, "name": set_name,
+        "item_indices": item_indices, "spells": spells
+    })
+
+    print(f"\n✅ Set '{set_name}' (ID {set_id}) created with {len(item_indices)} items "
+          f"and {len(spells)} bonus tier(s).")
+
+
 while True:
     print("\n--- NEW ITEM GENERATION BATCH ---")
 
@@ -1822,7 +1949,8 @@ while True:
     print("  [3] All of the above (random per item)")
     print("  [4] ⚡ Mass Creation (auto-populate, no archetype prompts)")
     print("  [5] 🎯 Assign Loot to Mobs (uses items already in memory)")
-    group_choice = get_input("Choice: ", lambda x: int(x) if x in ['1', '2', '3', '4', '5'] else int("err"))
+    print("  [6] 🎁 Create Item Set (group items already in memory)")
+    group_choice = get_input("Choice: ", lambda x: int(x) if x in ['1', '2', '3', '4', '5', '6'] else int("err"))
 
     if group_choice == 4:
         run_mass_creation()
@@ -1832,6 +1960,12 @@ while True:
 
     if group_choice == 5:
         run_loot_assignment()
+        if get_input("\nReturn to menu? (y/n): ", lambda x: x.lower() if x.lower() in ['y', 'n'] else int("err")) == 'n':
+            break
+        continue
+
+    if group_choice == 6:
+        run_itemset_creation()
         if get_input("\nReturn to menu? (y/n): ", lambda x: x.lower() if x.lower() in ['y', 'n'] else int("err")) == 'n':
             break
         continue
@@ -1985,6 +2119,33 @@ while True:
                 "Percentage of items to receive a random enchantment (0-100): ",
                 lambda x: float(x) if 0.0 <= float(x) <= 100.0 else float("err")
             ) / 100.0
+
+    print("\nItem Spell (On-Equip Aura / On-Use Effect):")
+    print("  [1] No spell")
+    print("  [2] Yes -- On Equip (passive aura while worn, e.g. proc/stat effect)")
+    print("  [3] Yes -- On Use (activated ability with charges/cooldown)")
+    spell_mode = get_input("Choice: ", lambda x: int(x) if int(x) in [1, 2, 3] else int("err"))
+    batch_spell_id = 0
+    batch_spell_trigger = 0
+    batch_spell_charges = 0
+    batch_spell_cooldown = -1
+    spell_pct = 100.0
+    if spell_mode in (2, 3):
+        batch_spell_id = get_input("Enter Spell ID: ", lambda x: int(x) if int(x) > 0 else int("err"))
+        batch_spell_trigger = 1 if spell_mode == 2 else 0  # 1=On Equip, 0=On Use
+        if spell_mode == 3:
+            batch_spell_charges = get_input(
+                "Charges (0 = unlimited uses, >0 = item is consumed after N uses): ",
+                lambda x: int(x) if int(x) >= 0 else int("err")
+            )
+            batch_spell_cooldown = get_input(
+                "Cooldown in ms (-1 = use the spell's own cooldown from spell.dbc): ",
+                lambda x: int(x) if int(x) >= -1 else int("err")
+            )
+        spell_pct = get_input(
+            "Percentage of items in this batch that receive the spell (0-100): ",
+            lambda x: float(x) if 0.0 <= float(x) <= 100.0 else float("err")
+        )
 
     quantity = get_input("\nHow many items?: ", lambda x: int(x) if int(x) > 0 else int("err"))
 
@@ -2176,6 +2337,16 @@ while True:
         base_sell_price = calculate_item_sell_price(lookup_database, category, quality_code, ilvl)
         final_sell_price = int(base_sell_price * fuzz_factor)
 
+        item_spellid = 0
+        item_spelltrigger = 0
+        item_spellcharges = 0
+        item_spellcooldown = -1
+        if spell_mode in (2, 3) and random.random() < (spell_pct / 100.0):
+            item_spellid = batch_spell_id
+            item_spelltrigger = batch_spell_trigger
+            item_spellcharges = batch_spell_charges
+            item_spellcooldown = batch_spell_cooldown
+
         internal_memory.append({
             "config": category, "quality": quality_code, "ilvl": ilvl,
             "name": generated_name, "displayid": display_obj.get("id"),
@@ -2186,7 +2357,10 @@ while True:
             "required_level": req_level, "Material": item_material,
             "sheath": item_sheath, "sell_price": final_sell_price,
             "bonding": item_bonding,
-            "rand_prop": item_rand_prop, "rand_suf": item_rand_suf
+            "rand_prop": item_rand_prop, "rand_suf": item_rand_suf,
+            "itemset": 0,
+            "spellid": item_spellid, "spelltrigger": item_spelltrigger,
+            "spellcharges": item_spellcharges, "spellcooldown": item_spellcooldown
         })
 
     print(f"Saved {quantity} items. Total cached: {len(internal_memory)}")
@@ -2210,8 +2384,8 @@ with open(output_filename, "w") as f:
         # The name in internal_memory is unchanged; only the SQL output escapes it.
         sql_name = item['name'].replace("'", "''")
         sql_string = f"""DELETE FROM `item_template` WHERE `entry` = {current_id};
-INSERT INTO `item_template` (`entry`, `class`, `subclass`, `name`, `displayid`, `Quality`, `InventoryType`, `itemlevel`, `RequiredLevel`, `armor`, `block`, `bonding`, `RandomProperty`, `RandomSuffix`, `delay`, `dmg_min1`, `dmg_max1`, `dmg_type1`, `stat_type1`, `stat_value1`, `stat_type2`, `stat_value2`, `stat_type3`, `stat_value3`, `stat_type4`, `stat_value4`, `stat_type5`, `stat_value5`, `stat_type6`, `stat_value6`, `Material`, `sheath`, `SellPrice`, `Description`) 
-VALUES ({current_id}, {c['class']}, {c['subclass']}, '{sql_name}', {item['displayid']}, {item['quality']}, {c['InventoryType']}, {item['ilvl']}, {item['required_level']}, {item.get('armor', 0)}, {item.get('block', 0)}, {item.get('bonding', 1)}, {item.get('rand_prop', 0)}, {item.get('rand_suf', 0)}, {item['delay']}, {item['dmg_min']}, {item['dmg_max']}, {c['dmg_type1']}, {s['stat_type1']}, {s['stat_value1']}, {s['stat_type2']}, {s['stat_value2']}, {s['stat_type3']}, {s['stat_value3']}, {s['stat_type4']}, {s['stat_value4']}, {s['stat_type5']}, {s['stat_value5']}, {s['stat_type6']}, {s['stat_value6']}, {item['Material']}, {item['sheath']}, {item.get('sell_price', 0)}, '{description}');\n"""
+INSERT INTO `item_template` (`entry`, `class`, `subclass`, `name`, `displayid`, `Quality`, `InventoryType`, `itemlevel`, `RequiredLevel`, `armor`, `block`, `bonding`, `RandomProperty`, `RandomSuffix`, `delay`, `dmg_min1`, `dmg_max1`, `dmg_type1`, `stat_type1`, `stat_value1`, `stat_type2`, `stat_value2`, `stat_type3`, `stat_value3`, `stat_type4`, `stat_value4`, `stat_type5`, `stat_value5`, `stat_type6`, `stat_value6`, `Material`, `sheath`, `SellPrice`, `itemset`, `spellid_1`, `spelltrigger_1`, `spellcharges_1`, `spellcooldown_1`, `spellcategory_1`, `spellcategorycooldown_1`, `Description`) 
+VALUES ({current_id}, {c['class']}, {c['subclass']}, '{sql_name}', {item['displayid']}, {item['quality']}, {c['InventoryType']}, {item['ilvl']}, {item['required_level']}, {item.get('armor', 0)}, {item.get('block', 0)}, {item.get('bonding', 1)}, {item.get('rand_prop', 0)}, {item.get('rand_suf', 0)}, {item['delay']}, {item['dmg_min']}, {item['dmg_max']}, {c['dmg_type1']}, {s['stat_type1']}, {s['stat_value1']}, {s['stat_type2']}, {s['stat_value2']}, {s['stat_type3']}, {s['stat_value3']}, {s['stat_type4']}, {s['stat_value4']}, {s['stat_type5']}, {s['stat_value5']}, {s['stat_type6']}, {s['stat_value6']}, {item['Material']}, {item['sheath']}, {item.get('sell_price', 0)}, {item.get('itemset', 0)}, {item.get('spellid', 0)}, {item.get('spelltrigger', 0)}, {item.get('spellcharges', 0)}, {item.get('spellcooldown', -1)}, 0, -1, '{description}');\n"""
         f.write(sql_string)
         
         combat_info = f" ({item['dps']} DPS | Min-Max: {item['dmg_min']}-{item['dmg_max']})" if c['class'] == 2 else " (Armor Piece)"
@@ -2269,6 +2443,41 @@ with open(csv_filename, "w", newline='') as f:
         ])
 
 print(f"✅ CSV export successful!")
+
+if generated_itemsets:
+    itemset_csv_filename = "generated_itemsets.csv"
+    print(f"\n💾 Exporting {len(generated_itemsets)} item set(s) to {itemset_csv_filename} (ItemSet.dbc format)...")
+
+    LOCALE_SUFFIXES = ["enUS", "enGB", "koKR", "frFR", "deDE", "enCN", "zhCN",
+                       "enTW", "zhTW", "esES", "esMX", "ruRU", "ptPT", "ptBR",
+                       "itIT", "Unk"]  # 16 locale slots, WDBXEditor/AC convention
+
+    with open(itemset_csv_filename, "w", newline='') as f:
+        writer = csv.writer(f, quoting=csv.QUOTE_ALL)
+        header = ["ID"]
+        header += [f"Name_Lang_{loc}" for loc in LOCALE_SUFFIXES]
+        header += ["Name_Lang_Mask"]
+        header += [f"ItemID_{i}" for i in range(1, 18)]
+        header += [f"SetSpellID_{i}" for i in range(1, 9)]
+        header += [f"SetThreshold_{i}" for i in range(1, 9)]
+        header += ["RequiredSkill", "RequiredSkillRank"]
+        writer.writerow(header)
+
+        for iset in generated_itemsets:
+            entry_ids = [start_entry_id + idx for idx in iset["item_indices"]]
+            item_id_cols = entry_ids + [0] * (17 - len(entry_ids))
+            spell_cols = [s for (_, s) in iset["spells"]] + [0] * (8 - len(iset["spells"]))
+            threshold_cols = [t for (t, _) in iset["spells"]] + [0] * (8 - len(iset["spells"]))
+            # Only enUS gets the name; every other locale stays empty (client falls
+            # back to enUS via the mask, same convention AC uses for its own DBCs).
+            name_cols = [iset["name"]] + [""] * (len(LOCALE_SUFFIXES) - 1)
+            row = ([iset["id"]] + name_cols + [16712190]
+                    + item_id_cols + spell_cols + threshold_cols
+                    + [0, 0])  # RequiredSkill, RequiredSkillRank
+            writer.writerow(row)
+            print(f"   -> Set [{iset['id']}] '{iset['name']}' -- items: {entry_ids}")
+    print(f"✅ Item Set export successful!")
+
 print("🏁 Generation complete! compiling Excel tooltips sheet...")
 
 # ⚡ Call the tooltips function directly here without any 'except' statement:

@@ -2,18 +2,59 @@ import mysql.connector
 import pandas as pd
 import joblib
 import warnings
+import os
+import json
 
 warnings.filterwarnings("ignore")
 
-print("Step 1: Connecting to AzerothCore Database...")
-db_config = {
-    "host": "127.0.0.1",
-    "user": "acore",
-    "password": "acore",
-    "database": "acore_world",
-    "port": 3306
+# -- Load external config (config.json, same folder as this script) ----------
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+
+DEFAULT_CONFIG = {
+    "database": {
+        "host": "127.0.0.1",
+        "port": 3306,
+        "user": "acore",
+        "password": "acore",
+        "database": "acore_world"
+    },
+    "entry_id_start": 91000,
+    "brain_file": "blizzlike_master_brain.pkl",
+    "material_library_file": "material_library.joblib"
 }
 
+def load_config(path):
+    if not os.path.exists(path):
+        print(f"⚠️  No config.json found at {path}.")
+        print("    Creating one with default values -- edit it with your DB credentials and rerun.")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(DEFAULT_CONFIG, f, indent=2)
+        print(f"    Wrote default config to {path}")
+        exit()
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+    except Exception as e:
+        print(f"❌ Failed to parse {path}: {e}")
+        exit()
+    for key, val in DEFAULT_CONFIG.items():
+        if key not in cfg:
+            cfg[key] = val
+    for key, val in DEFAULT_CONFIG["database"].items():
+        cfg["database"].setdefault(key, val)
+    return cfg
+
+CONFIG = load_config(CONFIG_PATH)
+
+db_config = {
+    "host": CONFIG["database"]["host"],
+    "user": CONFIG["database"]["user"],
+    "password": CONFIG["database"]["password"],
+    "database": CONFIG["database"]["database"],
+    "port": CONFIG["database"]["port"]
+}
+
+print("Step 1: Connecting to AzerothCore Database...")
 try:
     conn = mysql.connector.connect(**db_config)
 except Exception as e:
@@ -928,7 +969,7 @@ weapons_df = df[(df['class'] == 2) & (df['delay'] > 0)]
 subclass_delays = weapons_df.groupby('subclass')['delay'].mean().round().astype(int).to_dict()
 
 # Save this library alongside your other brain data
-joblib.dump(material_library, 'material_library.joblib')
+joblib.dump(material_library, CONFIG["material_library_file"])
 
 
 
@@ -938,7 +979,7 @@ for (c, sc, q), group in df.groupby(['class', 'subclass', 'Quality']):
     material_library[(c, sc, q)] = valid_pairs
 
 # Save this library alongside your other brain data
-joblib.dump(material_library, 'material_library.joblib')
+joblib.dump(material_library, CONFIG["material_library_file"])
 master_brain = {
     "lookup_database": lookup_database,
     "slot_budget_curves": slot_budget_curves,
@@ -949,5 +990,5 @@ master_brain = {
     "weapon_nouns": WEAPON_NOUNS,     
     "armor_nouns": ARMOR_NOUNS        
 }
-joblib.dump(master_brain, "blizzlike_master_brain.pkl")
+joblib.dump(master_brain, CONFIG["brain_file"])
 print("🎉 Success! Cohesive Archetype Matrix successfully compiled and exported.")
